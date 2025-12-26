@@ -24,3 +24,4 @@ if __name__ == "__main__":
 
     print(weights["model.layers.0.self_attn.q_proj.weight"].shape)
     print(weights["model.layers.0.self_attn.q_proj.weight"].dtype)
+    print(weights["model.layers.0.post_attention_layernorm.weight"])
