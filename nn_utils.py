@@ -28,8 +28,27 @@ def mlp(
     return x
 
 
-def Block(x: jax.Array, block_params: Params, layer: int) -> jax.Array:
+def gelu(x: jax.Array) -> jax.Array:
+    pass
+
+
+def Block(x: jax.Array, block_params: Params) -> jax.Array:
     r"""
+    block_params has keys:
+    input_layernorm.weight (1152,)
+    mlp.down_proj.weight (1152, 6912)
+    mlp.gate_proj.weight (6912, 1152)
+    mlp.up_proj.weight (6912, 1152)
+    post_attention_layernorm.weight (1152,)
+    post_feedforward_layernorm.weight (1152,)
+    pre_feedforward_layernorm.weight (1152,)
+    self_attn.k_norm.weight (256,)
+    self_attn.k_proj.weight (256, 1152)
+    self_attn.o_proj.weight (1152, 1024)
+    self_attn.q_norm.weight (256,)
+    self_attn.q_proj.weight (1024, 1152)
+    self_attn.v_proj.weight (256, 1152)
+
     Plan:
     1.  Input layernorm
     2.  Derive K,V and all four Q matrices.
@@ -51,4 +70,32 @@ def Block(x: jax.Array, block_params: Params, layer: int) -> jax.Array:
     10. Layernorm
         (1152,)
     """
-    pass
+    epsilon = 1e-6
+    # make a copy of x to keep the residual
+    # maybe this should be done after the layernorm?
+    x_og = x
+
+    x = RMSNorm(x, block_params["input_layernorm.weight"], epsilon)
+
+    # Attention
+    K = block_params["self_attn.k.norm.weight"] @ x
+    V = block_params["self_attn.v.norm.weight"] @ x
+    Qs = block_params["self_attn.q.norm.weight"] @ x
+
+    # COMMUNICATION WITH OTHER TOKENS
+
+    x = RMSNorm(x, block_params["post_attention_layernorm.weight"], epsilon)
+    x = x + x_og
+
+    # MLP
+    x = RMSNorm(x, block_params["pre_feedforward_layernorm.weight"], epsilon)
+    x = mlp(
+        x,
+        block_params["mlp.down_proj.weight"],
+        block_params["mlp.gate_proj.weight"],
+        block_params["mlp.up_proj.weight"],
+        gelu,
+    )
+    x = RMSNorm(x, block_params["post_feedforward_layernorm.weight"], epsilon)
+
+    return x
