@@ -32,7 +32,7 @@ def gelu(x: jax.Array) -> jax.Array:
     pass
 
 
-def Block(x: jax.Array, block_params: Params) -> jax.Array:
+def Block(xs: jax.Array, block_params: Params) -> jax.Array:
     r"""
     block_params has keys:
     input_layernorm.weight (1152,)
@@ -73,39 +73,50 @@ def Block(x: jax.Array, block_params: Params) -> jax.Array:
     epsilon = 1e-6
     # make a copy of x to keep the residual
     # maybe this should be done after the layernorm?
-    x_og = x
+    xs_og = xs
+    xs = jax.vmap(
+        lambda x: RMSNorm(x, block_params["input_layernorm.weight"], epsilon)
+    )(xs)
 
-    x = RMSNorm(x, block_params["input_layernorm.weight"], epsilon)
+    def preAttn(x: jax.Array) -> tuple[jax.Array, jax.Array, jax.Array]:
+        # Prepare for attention
+        K = block_params["self_attn.k.proj.weight"] @ x
+        K = RMSNorm(K, block_params["self_attn.k.norm.weight"], epsilon)
+        V = block_params["self_attn.v.proj.weight"] @ x
+        Qs = block_params["self_attn.q.proj.weight"] @ x
+        Qs = jnp.reshape(Qs, (4, 256))
+        Qs = jax.vmap(
+            lambda Q: RMSNorm(Q, block_params["self_attn.q.norm.weight"], epsilon)
+        )(Qs)
 
-    # Prepare for attention
-    K = block_params["self_attn.k.proj.weight"] @ x
-    K = RMSNorm(K, block_params["self_attn.k.norm.weight"], epsilon)
-    V = block_params["self_attn.v.proj.weight"] @ x
-    Qs = block_params["self_attn.q.proj.weight"] @ x
-    Qs = jnp.reshape(Qs, (4, 256))
-    Qs = jax.vmap(
-        lambda Q: RMSNorm(Q, block_params["self_attn.q.norm.weight"], epsilon)
-    )
+        return K, V, Qs
+
+    Ks, Vs, Qss = jax.vmap(preAttn)(xs)
 
     # COMMUNICATION WITH OTHER TOKENS
     # x = ?
 
-    # map attention output back to d_model
-    x = block_params["self_attn.o.proj.weight"] @ x
+    def postAttn(x: jax.Array, x_og: jax.Array) -> jax.Array:
+        # map attention output back to d_model
+        x = block_params["self_attn.o.proj.weight"] @ x
 
-    # Norm and residual
-    x = RMSNorm(x, block_params["post_attention_layernorm.weight"], epsilon)
-    x = x + x_og
+        # Norm and residual
+        x = RMSNorm(x, block_params["post_attention_layernorm.weight"], epsilon)
+        x = x + x_og
 
-    # MLP
-    x = RMSNorm(x, block_params["pre_feedforward_layernorm.weight"], epsilon)
-    x = mlp(
-        x,
-        block_params["mlp.down_proj.weight"],
-        block_params["mlp.gate_proj.weight"],
-        block_params["mlp.up_proj.weight"],
-        gelu,
-    )
-    x = RMSNorm(x, block_params["post_feedforward_layernorm.weight"], epsilon)
+        # MLP
+        x = RMSNorm(x, block_params["pre_feedforward_layernorm.weight"], epsilon)
+        x = mlp(
+            x,
+            block_params["mlp.down_proj.weight"],
+            block_params["mlp.gate_proj.weight"],
+            block_params["mlp.up_proj.weight"],
+            gelu,
+        )
+        x = RMSNorm(x, block_params["post_feedforward_layernorm.weight"], epsilon)
 
-    return x
+        return x
+
+    xs = jax.vmap(postAttn, in_axes=(0, 0))(xs, xs_og)
+
+    return xs
