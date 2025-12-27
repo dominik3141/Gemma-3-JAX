@@ -69,6 +69,26 @@ def postAttn(x: jax.Array, x_og: jax.Array, block_params: Params) -> jax.Array:
     return x
 
 
+def attnHead(K, V, Q) -> jax.Array:
+    r"""
+    softmax((QK^T / sqrt(d_k)) * V)
+
+    where d_k = dim(K) = dim(V) = dim(Q)
+    """
+    d_k = K.shape[-1]
+
+    return ((Q @ jnp.transpose(K)) / jnp.sqrt(d_k)) * V
+
+
+def Attention(Ks, Vs, Qss) -> jax.Array:
+    heads = jax.vmap(attnHead, in_axes=(None, None, 0))(Ks, Vs, Qss)
+
+    # heads has shape (sequence_len, 4, 256),
+    # we want to return it concatenated as (sequence_len, 1024)
+    sequence_len = heads.shape[0]
+    return jnp.reshape(heads, (sequence_len, 1024))
+
+
 def Block(xs: jax.Array, block_params: Params) -> jax.Array:
     r"""
     block_params has keys:
@@ -115,7 +135,7 @@ def Block(xs: jax.Array, block_params: Params) -> jax.Array:
     Ks, Vs, Qss = jax.vmap(preAttn, in_axes=(0, None))(xs, block_params)
 
     # COMMUNICATION WITH OTHER TOKENS
-    # x = ?
+    xs = Attention(Ks, Vs, Qss)
 
     xs = jax.vmap(postAttn, in_axes=(0, 0, None))(xs, xs_og, block_params)
 
