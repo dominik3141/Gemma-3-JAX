@@ -3,9 +3,10 @@ import jax
 from main import Params
 
 
-def RMSNorm(x: jax.Array, gamma: jax.Array, epsilon: float) -> jax.Array:
+def RMSNorm(x: jax.Array, gamma: jax.Array) -> jax.Array:
     # the weights for this norm are simply named '*layernorm*'
     # x and gamma should have the same shape
+    epsilon = 1e-6
     return x / (jnp.sqrt(jnp.mean(jnp.square(x)) + epsilon)) * gamma
 
 
@@ -70,24 +71,19 @@ def Block(xs: jax.Array, block_params: Params) -> jax.Array:
     10. Layernorm
         (1152,)
     """
-    epsilon = 1e-6
     # make a copy of x to keep the residual
     # maybe this should be done after the layernorm?
     xs_og = xs
-    xs = jax.vmap(
-        lambda x: RMSNorm(x, block_params["input_layernorm.weight"], epsilon)
-    )(xs)
+    xs = jax.vmap(lambda x: RMSNorm(x, block_params["input_layernorm.weight"]))(xs)
 
     def preAttn(x: jax.Array) -> tuple[jax.Array, jax.Array, jax.Array]:
         # Prepare for attention
         K = block_params["self_attn.k.proj.weight"] @ x
-        K = RMSNorm(K, block_params["self_attn.k.norm.weight"], epsilon)
+        K = RMSNorm(K, block_params["self_attn.k.norm.weight"])
         V = block_params["self_attn.v.proj.weight"] @ x
         Qs = block_params["self_attn.q.proj.weight"] @ x
         Qs = jnp.reshape(Qs, (4, 256))
-        Qs = jax.vmap(
-            lambda Q: RMSNorm(Q, block_params["self_attn.q.norm.weight"], epsilon)
-        )(Qs)
+        Qs = jax.vmap(lambda Q: RMSNorm(Q, block_params["self_attn.q.norm.weight"]))(Qs)
 
         return K, V, Qs
 
@@ -101,11 +97,11 @@ def Block(xs: jax.Array, block_params: Params) -> jax.Array:
         x = block_params["self_attn.o.proj.weight"] @ x
 
         # Norm and residual
-        x = RMSNorm(x, block_params["post_attention_layernorm.weight"], epsilon)
+        x = RMSNorm(x, block_params["post_attention_layernorm.weight"])
         x = x + x_og
 
         # MLP
-        x = RMSNorm(x, block_params["pre_feedforward_layernorm.weight"], epsilon)
+        x = RMSNorm(x, block_params["pre_feedforward_layernorm.weight"])
         x = mlp(
             x,
             block_params["mlp.down_proj.weight"],
@@ -113,7 +109,7 @@ def Block(xs: jax.Array, block_params: Params) -> jax.Array:
             block_params["mlp.up_proj.weight"],
             gelu,
         )
-        x = RMSNorm(x, block_params["post_feedforward_layernorm.weight"], epsilon)
+        x = RMSNorm(x, block_params["post_feedforward_layernorm.weight"])
 
         return x
 
