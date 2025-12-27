@@ -77,13 +77,23 @@ def Block(x: jax.Array, block_params: Params) -> jax.Array:
 
     x = RMSNorm(x, block_params["input_layernorm.weight"], epsilon)
 
-    # Attention
-    K = block_params["self_attn.k.norm.weight"] @ x
-    V = block_params["self_attn.v.norm.weight"] @ x
-    Qs = block_params["self_attn.q.norm.weight"] @ x
+    # Prepare for attention
+    K = block_params["self_attn.k.proj.weight"] @ x
+    K = RMSNorm(K, block_params["self_attn.k.norm.weight"], epsilon)
+    V = block_params["self_attn.v.proj.weight"] @ x
+    Qs = block_params["self_attn.q.proj.weight"] @ x
+    Qs = jnp.reshape(Qs, (4, 256))
+    Qs = jax.vmap(
+        lambda Q: RMSNorm(Q, block_params["self_attn.q.norm.weight"], epsilon)
+    )
 
     # COMMUNICATION WITH OTHER TOKENS
+    # x = ?
 
+    # map attention output back to d_model
+    x = block_params["self_attn.o.proj.weight"] @ x
+
+    # Norm and residual
     x = RMSNorm(x, block_params["post_attention_layernorm.weight"], epsilon)
     x = x + x_og
 
