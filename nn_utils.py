@@ -30,10 +30,6 @@ def mlp(
     return x
 
 
-def gelu(x: jax.Array) -> jax.Array:
-    pass
-
-
 def preAttn(
     x: jax.Array, block_params: Params, pos: jax.Array
 ) -> tuple[jax.Array, jax.Array, jax.Array]:
@@ -66,7 +62,7 @@ def postAttn(x: jax.Array, x_og: jax.Array, block_params: Params) -> jax.Array:
         block_params["mlp.down_proj.weight"],
         block_params["mlp.gate_proj.weight"],
         block_params["mlp.up_proj.weight"],
-        gelu,
+        jax.nn.gelu,
     )
     x = x + x_mlp_residual
     x = RMSNorm(x, block_params["post_feedforward_layernorm.weight"])
