@@ -1,6 +1,5 @@
 import jax.numpy as jnp
 import jax
-from functools import partial
 
 
 Params = dict[str, jax.Array]
@@ -121,7 +120,7 @@ def attnHead(Ks, Vs, Qs) -> jax.Array:
     return Z_a
 
 
-def Block(params: Params, xs: jax.Array, block_id: int) -> jax.Array:
+def Block(xs: jax.Array, block_params: Params) -> jax.Array:
     r"""
     block_params has keys:
     input_layernorm.weight (1152,)
@@ -159,8 +158,6 @@ def Block(params: Params, xs: jax.Array, block_id: int) -> jax.Array:
     10. Layernorm
         (1152,)
     """
-    block_params = _block_params(params, block_id)
-
     # make a copy of x to keep the residual
     # maybe this should be done after the layernorm?
     xs_og = xs
@@ -197,48 +194,13 @@ def Block(params: Params, xs: jax.Array, block_id: int) -> jax.Array:
     return xs, None
 
 
-def _block_params(params: Params, block_id: int) -> Params:
-    """
-    Returns the block parameters for a block of given id.
+def block_params(params: Params) -> Params:
+    block_params = {}
 
-    block_params has keys:
-    input_layernorm.weight (1152,)
-    mlp.down_proj.weight (1152, 6912)
-    mlp.gate_proj.weight (6912, 1152)
-    mlp.up_proj.weight (6912, 1152)
-    post_attention_layernorm.weight (1152,)
-    post_feedforward_layernorm.weight (1152,)
-    pre_feedforward_layernorm.weight (1152,)
-    self_attn.k_norm.weight (256,)
-    self_attn.k_proj.weight (256, 1152)
-    self_attn.o_proj.weight (1152, 1024)
-    self_attn.q_norm.weight (256,)
-    self_attn.q_proj.weight (1024, 1152)
-    self_attn.v_proj.weight (256, 1152)
-    """
-    prefix = f"model.layers.{block_id}."
-
-    block_params = {
-        "input_layernorm.weight": params[prefix + "input_layernorm.weight"],
-        "mlp.down_proj.weight": params[prefix + "mlp.down_proj.weight"],
-        "mlp.gate_proj.weight": params[prefix + "mlp.gate_proj.weight"],
-        "mlp.up_proj.weight": params[prefix + "mlp.up_proj.weight"],
-        "post_attention_layernorm.weight": params[
-            prefix + "post_attention_layernorm.weight"
-        ],
-        "post_feedforward_layernorm.weight": params[
-            prefix + "post_feedforward_layernorm.weight"
-        ],
-        "pre_feedforward_layernorm.weight": params[
-            prefix + "pre_feedforward_layernorm.weight"
-        ],
-        "self_attn.k_norm.weight": params[prefix + "self_attn.k_norm.weight"],
-        "self_attn.k_proj.weight": params[prefix + "self_attn.k_proj.weight"],
-        "self_attn.o_proj.weight": params[prefix + "self_attn.o_proj.weight"],
-        "self_attn.q_norm.weight": params[prefix + "self_attn.q_norm.weight"],
-        "self_attn.q_proj.weight": params[prefix + "self_attn.q_proj.weight"],
-        "self_attn.v_proj.weight": params[prefix + "self_attn.v_proj.weight"],
-    }
+    for key, val in params.items():
+        if key.startswith("model.layers_stacked"):
+            prefix, suffix = key.split("model.layers_stacked.")
+            block_params[suffix] = val
 
     return block_params
 
@@ -264,9 +226,7 @@ def forward(xs: jax.Array, params: Params) -> jax.Array:
     xs = jnp.concat([xs[1:], jnp.zeros_like(xs[:1])])
 
     # BLOCKS
-    block_ids = jnp.arange(0, 25, 1)  # 0, 1, 2, ..., 25
-    Block_fn_with_param = partial(Block, params)
-    xs, _ = jax.lax.scan(Block_fn_with_param, xs, block_ids)
+    xs, _ = jax.lax.scan(Block, xs, block_params(params))
 
     # final norm
     xs = jax.vmap(RMSNorm, in_axes=(0, None))(xs, params["model.norm.weight"])

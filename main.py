@@ -9,7 +9,7 @@ def main():
     token_ids = jnp.array([123, 231])
     xs = jax.nn.one_hot(token_ids, vocab_size)
 
-    params = load_weights_as_dict("model.safetensors")
+    params = load_weights_as_dict("model_stacked.safetensors")
     xs = forward(xs, params)
 
     print(xs)
