@@ -1,3 +1,4 @@
+from turtle import position
 import jax.numpy as jnp
 import jax
 from main import Params
@@ -34,15 +35,17 @@ def gelu(x: jax.Array) -> jax.Array:
 
 
 def preAttn(
-    x: jax.Array, block_params: Params
+    x: jax.Array, block_params: Params, pos: jax.Array
 ) -> tuple[jax.Array, jax.Array, jax.Array]:
     # Prepare for attention
     K = block_params["self_attn.k_proj.weight"] @ x
     K = RMSNorm(K, block_params["self_attn.k_norm.weight"])
+    K = RoPE(K, pos)
     V = block_params["self_attn.v_proj.weight"] @ x
     Qs = block_params["self_attn.q_proj.weight"] @ x
     Qs = jnp.reshape(Qs, (4, 256))
     Qs = jax.vmap(lambda Q: RMSNorm(Q, block_params["self_attn.q_norm.weight"]))(Qs)
+    Qs = jax.vmap(RoPE, in_axes=(0, None))(Qs, pos)
 
     return K, V, Qs
 
@@ -134,7 +137,12 @@ def Block(xs: jax.Array, block_params: Params) -> jax.Array:
     xs_og = xs
     xs = jax.vmap(lambda x: RMSNorm(x, block_params["input_layernorm.weight"]))(xs)
 
-    Ks, Vs, Qss = jax.vmap(preAttn, in_axes=(0, None))(xs, block_params)
+    # we need to also keep track of a tokens position within the sequence of tokens so that we can calculate the
+    # positional embedding
+    sequence_len = xs.shape[0]
+    pos = jnp.arange(0, sequence_len, 1, dtype=int)
+
+    Ks, Vs, Qss = jax.vmap(preAttn, in_axes=(0, None, 0))(xs, block_params, pos)
 
     # COMMUNICATION WITH OTHER TOKENS
     """
@@ -153,7 +161,6 @@ def Block(xs: jax.Array, block_params: Params) -> jax.Array:
     xs = jax.vmap(lambda Ks, Vs, Qs: attnHead(Ks, Vs, Qs), in_axes=(None, None, 0))(
         Ks, Vs, Qss
     )
-    sequence_len = xs.shape[0]
     xs = jnp.reshape(xs, (sequence_len, 1024))
 
     xs = jax.vmap(postAttn, in_axes=(0, 0, None))(xs, xs_og, block_params)
