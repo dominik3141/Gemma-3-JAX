@@ -56,6 +56,7 @@ def postAttn(x: jax.Array, x_og: jax.Array, block_params: Params) -> jax.Array:
     x = x + x_og
 
     # MLP
+    x_mlp_residual = x
     x = RMSNorm(x, block_params["pre_feedforward_layernorm.weight"])
     x = mlp(
         x,
@@ -64,6 +65,7 @@ def postAttn(x: jax.Array, x_og: jax.Array, block_params: Params) -> jax.Array:
         block_params["mlp.up_proj.weight"],
         gelu,
     )
+    x = x + x_mlp_residual
     x = RMSNorm(x, block_params["post_feedforward_layernorm.weight"])
 
     return x
