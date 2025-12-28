@@ -257,10 +257,10 @@ def forward(xs: jax.Array, params: Params) -> jax.Array:
         (seq_len, 1152) -> (seq_len, 262144)
     """
     # embedding the tokens
-    xs = jax.vmap(lambda x: params["model.embed_tokens.weight"] @ x)
+    xs = jax.vmap(lambda x: jnp.transpose(params["model.embed_tokens.weight"]) @ x)(xs)
 
-    # add new token
-    xs = jnp.concat([xs, jnp.zeros_like(xs[0])])
+    # shift left
+    xs = jnp.concat([xs[1:], jnp.zeros_like(xs[0])])
 
     # BLOCKS
     block_ids = jnp.arange(0, 25, 1)  # 0, 1, 2, ..., 25
@@ -270,6 +270,6 @@ def forward(xs: jax.Array, params: Params) -> jax.Array:
     xs = jax.vmap(RMSNorm, in_axes=(0, None))(xs, params["model.norm.weight"])
 
     # map to logits
-    xs = jax.vmap(lambda x: jnp.transpose(params["model.embed_tokens.weight"]) @ x)(xs)
+    xs = jax.vmap(lambda x: params["model.embed_tokens.weight"] @ x)(xs)
 
     return xs
