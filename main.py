@@ -1,31 +1,12 @@
 import jax
-
-Params = dict[str, jax.Array]
-
-
-def forward(xs, Params) -> jax.Array:
-    """
-    xs is a sequence of tokens (tokenization happens outside this function).
-    We are trying to predict the next token.
-
-    Steps:
-    1.  Embedding the tokens
-        vocab_size -> d_model
-    ITERATE (26 Blocks):
-        2.  Attention
-            d_model -> d_model
-        3.  MLP
-            d_model -> d_model
-    4.  Final RMSNorm
-        d_model -> d_model
-    5.  Make logits
-        d_model -> vocab_size
-    """
-    pass
+import jax.numpy as jnp
 
 
 def main():
-    print("Hello from jax-gemma-1b!")
+    vocab_size = 262144
+    token_ids = jnp.array([123, 231])
+    xs = jax.nn.one_hot(token_ids, vocab_size)
+    print(xs)
 
 
 if __name__ == "__main__":

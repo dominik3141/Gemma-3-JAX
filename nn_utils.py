@@ -1,6 +1,8 @@
 import jax.numpy as jnp
 import jax
-from main import Params
+
+
+Params = dict[str, jax.Array]
 
 
 def RMSNorm(x: jax.Array, gamma: jax.Array) -> jax.Array:
@@ -156,6 +158,8 @@ def Block(xs: jax.Array, params: Params, block_id: int) -> jax.Array:
     10. Layernorm
         (1152,)
     """
+    block_params = _block_params(params, block_id)
+
     # make a copy of x to keep the residual
     # maybe this should be done after the layernorm?
     xs_og = xs
@@ -190,18 +194,6 @@ def Block(xs: jax.Array, params: Params, block_id: int) -> jax.Array:
     xs = jax.vmap(postAttn, in_axes=(0, 0, None))(xs, xs_og, block_params)
 
     return xs
-
-
-def block_params(params: Params) -> Params:
-    r"""
-    We need to return a dictionary of shape
-    "input_layernorm.weight": (26, 1152)
-    "mlp.down_proj.weight": (26, 1152, 6912)
-    ...
-
-    so we can then scan over the leading dimension.
-    """
-    pass
 
 
 def _block_params(params: Params, block_id: int) -> Params:
@@ -255,12 +247,14 @@ def forward(xs: jax.Array, params: Params) -> jax.Array:
     Plan:
     1.  Embedd the tokens
         (seq_len, 262144) -> (seq_len, 1152)
-    2.  Add new token
-        (seq_len, 1152) -> (seq_len + 1, 1152)
+    2.  Shift left
+        (seq_len, 1152) -> (seq_len, 1152)
     3.  Iterate over blocks
-        (seq_len + 1, 1152) -> (seq_len + 1, 1152)
-    4.  Sample from added token
-        (1152,) -> (262144,)
+        (seq_len, 1152) -> (seq_len, 1152)
+    4.  Final norm
+        (seq_len, 1152) -> (seq_len, 1152)
+    5.  Map to logits
+        (seq_len, 1152) -> (seq_len, 262144)
     """
     # embedding the tokens
     xs = jax.vmap(lambda x: params["model.embed_tokens.weight"] @ x)
@@ -271,3 +265,11 @@ def forward(xs: jax.Array, params: Params) -> jax.Array:
     # BLOCKS
     block_ids = jnp.arange(0, 25, 1)  # 0, 1, 2, ..., 25
     xs, _ = jax.lax.scan(Block, xs, block_ids)
+
+    # final norm
+    xs = jax.vmap(RMSNorm, in_axes=(0, None))(xs, params["model.norm.weight"])
+
+    # map to logits
+    xs = jax.vmap(lambda x: jnp.transpose(params["model.embed_tokens.weight"]) @ x)(xs)
+
+    return xs
