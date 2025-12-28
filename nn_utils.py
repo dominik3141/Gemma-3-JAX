@@ -190,3 +190,72 @@ def Block(xs: jax.Array, block_params: Params) -> jax.Array:
     xs = jax.vmap(postAttn, in_axes=(0, 0, None))(xs, xs_og, block_params)
 
     return xs
+
+
+def _block_params(params: Params, block_id: int) -> Params:
+    """
+    Returns the block parameters for a block of given id.
+
+    block_params has keys:
+    input_layernorm.weight (1152,)
+    mlp.down_proj.weight (1152, 6912)
+    mlp.gate_proj.weight (6912, 1152)
+    mlp.up_proj.weight (6912, 1152)
+    post_attention_layernorm.weight (1152,)
+    post_feedforward_layernorm.weight (1152,)
+    pre_feedforward_layernorm.weight (1152,)
+    self_attn.k_norm.weight (256,)
+    self_attn.k_proj.weight (256, 1152)
+    self_attn.o_proj.weight (1152, 1024)
+    self_attn.q_norm.weight (256,)
+    self_attn.q_proj.weight (1024, 1152)
+    self_attn.v_proj.weight (256, 1152)
+    """
+    prefix = f"model.layers.{block_id}."
+
+    block_params = {
+        "input_layernorm.weight": params[prefix + "input_layernorm.weight"],
+        "mlp.down_proj.weight": params[prefix + "mlp.down_proj.weight"],
+        "mlp.gate_proj.weight": params[prefix + "mlp.gate_proj.weight"],
+        "mlp.up_proj.weight": params[prefix + "mlp.up_proj.weight"],
+        "post_attention_layernorm.weight": params[
+            prefix + "post_attention_layernorm.weight"
+        ],
+        "post_feedforward_layernorm.weight": params[
+            prefix + "post_feedforward_layernorm.weight"
+        ],
+        "pre_feedforward_layernorm.weight": params[
+            prefix + "pre_feedforward_layernorm.weight"
+        ],
+        "self_attn.k_norm.weight": params[prefix + "self_attn.k_norm.weight"],
+        "self_attn.k_proj.weight": params[prefix + "self_attn.k_proj.weight"],
+        "self_attn.o_proj.weight": params[prefix + "self_attn.o_proj.weight"],
+        "self_attn.q_norm.weight": params[prefix + "self_attn.q_norm.weight"],
+        "self_attn.q_proj.weight": params[prefix + "self_attn.q_proj.weight"],
+        "self_attn.v_proj.weight": params[prefix + "self_attn.v_proj.weight"],
+    }
+
+    return block_params
+
+
+def forward(xs: jax.Array, params: Params) -> jax.Array:
+    r"""
+    Plan:
+    1.  Embedd the tokens
+        (seq_len, 262144) -> (seq_len, 1152)
+    2.  Add new token
+        (seq_len, 1152) -> (seq_len + 1, 1152)
+    3.  Iterate over blocks
+        (seq_len + 1, 1152) -> (seq_len + 1, 1152)
+    4.  Sample from added token
+        (1152,) -> (262144,)
+    """
+    # embedding the tokens
+    xs = jax.vmap(lambda x: params["model.embed_tokens.weight"] @ x)
+
+    # add new token
+    xs = jnp.concat([xs, jnp.zeros_like(xs[0])])
+
+    # BLOCKS
+    block_ids = jnp.arange(0, 25, 1)  # 0, 1, 2, ..., 25
+    xs, _ = jax.lax.scan(Block, xs, block_ids)
