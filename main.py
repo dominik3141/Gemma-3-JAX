@@ -1,5 +1,4 @@
 import jax
-import jax.numpy as jnp
 
 Params = dict[str, jax.Array]
 

@@ -1,4 +1,3 @@
-from turtle import position
 import jax.numpy as jnp
 import jax
 from main import Params
@@ -11,8 +10,37 @@ def RMSNorm(x: jax.Array, gamma: jax.Array) -> jax.Array:
     return x / (jnp.sqrt(jnp.mean(jnp.square(x)) + epsilon)) * gamma
 
 
-def RoPE(x: jax.Array, pos: jax.Array) -> jax.Array:
-    pass
+def RoPE(x: jax.Array, position: int) -> jax.Array:
+    """
+    Implemented by Gemini as I got annoyed with it.
+    Needs some optimization later, but good enough for now.
+    """
+    theta_base = 10000.0
+
+    # head_dim is the last dimension of our tensor
+    d = x.shape[-1]
+
+    # Compute the frequency constants for the dimensions
+    # We only need d//2 frequencies because we work in 2D planes
+    idx = jnp.arange(0, d, 2)
+    freqs = position / (theta_base ** (idx / d))
+
+    # Calculate cos and sin components
+    # We repeat them to match the full head_dim
+    cos = jnp.cos(jnp.concatenate([freqs, freqs], axis=-1))
+    sin = jnp.sin(jnp.concatenate([freqs, freqs], axis=-1))
+
+    # Split x into [x_left, x_right] to perform the rotation
+    # For a vector [x1, x2, x3, x4], x_left is [x1, x2], x_right is [x3, x4]
+    half = d // 2
+    x_left = x[..., :half]
+    x_right = x[..., half:]
+
+    # The 'rotated' part of the formula: [-x_right, x_left]
+    # This corresponds to the complex rotation (x + iy) * (cos + isin)
+    x_rotated = jnp.concatenate([-x_right, x_left], axis=-1)
+
+    return (x * cos) + (x_rotated * sin)
 
 
 def mlp(
