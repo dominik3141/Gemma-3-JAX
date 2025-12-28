@@ -173,7 +173,7 @@ def Block(xs: jax.Array, params: Params, block_id: int) -> jax.Array:
     Ks, Vs, Qss = jax.vmap(preAttn, in_axes=(0, None, 0))(xs, block_params, pos)
 
     # COMMUNICATION WITH OTHER TOKENS
-    """
+    r"""
     The usual representation of the attention formula hides a lot of interesting stuff behind matrix operations,
     we try to write a much cleaner and more explicit version here while still preserving the usual performance. 
 
