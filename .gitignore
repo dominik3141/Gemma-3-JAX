@@ -12,3 +12,4 @@ wheels/
 model.safetensors
 model_stacked.safetensors
 tokenizer.json
+tokenizer.model
