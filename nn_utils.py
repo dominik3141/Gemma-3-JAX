@@ -118,7 +118,7 @@ def attnHead(Ks, Vs, Qs) -> jax.Array:
     return Z_a
 
 
-def Block(xs: jax.Array, block_params: Params) -> jax.Array:
+def Block(xs: jax.Array, params: Params, block_id: int) -> jax.Array:
     r"""
     block_params has keys:
     input_layernorm.weight (1152,)
@@ -190,6 +190,18 @@ def Block(xs: jax.Array, block_params: Params) -> jax.Array:
     xs = jax.vmap(postAttn, in_axes=(0, 0, None))(xs, xs_og, block_params)
 
     return xs
+
+
+def block_params(params: Params) -> Params:
+    r"""
+    We need to return a dictionary of shape
+    "input_layernorm.weight": (26, 1152)
+    "mlp.down_proj.weight": (26, 1152, 6912)
+    ...
+
+    so we can then scan over the leading dimension.
+    """
+    pass
 
 
 def _block_params(params: Params, block_id: int) -> Params:
