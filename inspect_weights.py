@@ -18,10 +18,6 @@ def load_weights_as_dict(path: str) -> dict[str, np.ndarray]:
 
 
 if __name__ == "__main__":
-    weights = load_weights_as_dict("model.safetensors")
+    weights = load_weights_as_dict("model_stacked.safetensors")
     for key in weights.keys():
         print(key, weights[key].shape)
-
-    print(weights["model.layers.0.self_attn.q_proj.weight"].shape)
-    print(weights["model.layers.0.self_attn.q_proj.weight"].dtype)
-    print(weights["model.layers.0.post_attention_layernorm.weight"])

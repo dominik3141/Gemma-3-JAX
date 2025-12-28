@@ -10,4 +10,5 @@ wheels/
 .venv
 
 model.safetensors
+model_stacked.safetensors
 tokenizer.json
