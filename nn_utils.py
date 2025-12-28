@@ -1,5 +1,6 @@
 import jax.numpy as jnp
 import jax
+from functools import partial
 
 
 Params = dict[str, jax.Array]
@@ -120,7 +121,7 @@ def attnHead(Ks, Vs, Qs) -> jax.Array:
     return Z_a
 
 
-def Block(xs: jax.Array, params: Params, block_id: int) -> jax.Array:
+def Block(params: Params, xs: jax.Array, block_id: int) -> jax.Array:
     r"""
     block_params has keys:
     input_layernorm.weight (1152,)
@@ -193,7 +194,7 @@ def Block(xs: jax.Array, params: Params, block_id: int) -> jax.Array:
 
     xs = jax.vmap(postAttn, in_axes=(0, 0, None))(xs, xs_og, block_params)
 
-    return xs
+    return xs, None
 
 
 def _block_params(params: Params, block_id: int) -> Params:
@@ -260,11 +261,12 @@ def forward(xs: jax.Array, params: Params) -> jax.Array:
     xs = jax.vmap(lambda x: jnp.transpose(params["model.embed_tokens.weight"]) @ x)(xs)
 
     # shift left
-    xs = jnp.concat([xs[1:], jnp.zeros_like(xs[0])])
+    xs = jnp.concat([xs[1:], jnp.zeros_like(xs[:1])])
 
     # BLOCKS
     block_ids = jnp.arange(0, 25, 1)  # 0, 1, 2, ..., 25
-    xs, _ = jax.lax.scan(Block, xs, block_ids)
+    Block_fn_with_param = partial(Block, params)
+    xs, _ = jax.lax.scan(Block_fn_with_param, xs, block_ids)
 
     # final norm
     xs = jax.vmap(RMSNorm, in_axes=(0, None))(xs, params["model.norm.weight"])
