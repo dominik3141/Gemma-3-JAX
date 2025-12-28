@@ -37,19 +37,19 @@ def preAttn(
     x: jax.Array, block_params: Params
 ) -> tuple[jax.Array, jax.Array, jax.Array]:
     # Prepare for attention
-    K = block_params["self_attn.k.proj.weight"] @ x
-    K = RMSNorm(K, block_params["self_attn.k.norm.weight"])
-    V = block_params["self_attn.v.proj.weight"] @ x
-    Qs = block_params["self_attn.q.proj.weight"] @ x
+    K = block_params["self_attn.k_proj.weight"] @ x
+    K = RMSNorm(K, block_params["self_attn.k_norm.weight"])
+    V = block_params["self_attn.v_proj.weight"] @ x
+    Qs = block_params["self_attn.q_proj.weight"] @ x
     Qs = jnp.reshape(Qs, (4, 256))
-    Qs = jax.vmap(lambda Q: RMSNorm(Q, block_params["self_attn.q.norm.weight"]))(Qs)
+    Qs = jax.vmap(lambda Q: RMSNorm(Q, block_params["self_attn.q_norm.weight"]))(Qs)
 
     return K, V, Qs
 
 
 def postAttn(x: jax.Array, x_og: jax.Array, block_params: Params) -> jax.Array:
     # map attention output back to d_model
-    x = block_params["self_attn.o.proj.weight"] @ x
+    x = block_params["self_attn.o_proj.weight"] @ x
 
     # Norm and residual
     x = RMSNorm(x, block_params["post_attention_layernorm.weight"])
