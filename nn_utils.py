@@ -100,43 +100,38 @@ def postAttn(x: jax.Array, x_og: jax.Array, block_params: Params) -> jax.Array:
     return x
 
 
-def Attn(Q_a: jax.Array, Ks: jax.Array) -> jax.Array:
+def Attn(Q_a: jax.Array, Ks: jax.Array, a: jax.Array) -> jax.Array:
+    """
+    Calculates masked attention scores.
+    """
     d_k = Q_a.shape[0]
+    seq_len = Ks.shape[0]
     assert d_k == 256
 
-    return jax.nn.softmax((Q_a @ jnp.transpose(Ks)) / jnp.sqrt(d_k))
+    scores = (Q_a @ jnp.transpose(Ks)) / jnp.sqrt(d_k)
+
+    # masking
+    idx = jnp.arange(0, seq_len, 1)
+    scores = jnp.where(idx <= a, scores, -jnp.inf)
+
+    return jax.nn.softmax(scores)
 
 
-def attnHead(Ks, Vs, Qs) -> jax.Array:
+def attnHead(Ks, Vs, Qs, pos) -> jax.Array:
     r"""
     We define
     Z_a := \sum_b Attn(a,b) * V_b,
     where Attn(a,b) := softmax((Q_a K_b^T)/sqrt(d_k))
     """
-    Z_a = jax.vmap(lambda Ks, Vs, Q_a: Attn(Q_a, Ks) @ Vs, in_axes=(None, None, 0))(
-        Ks, Vs, Qs
-    )
+    Z_a = jax.vmap(
+        lambda Ks, Vs, Q_a, a: Attn(Q_a, Ks, a) @ Vs, in_axes=(None, None, 0, 0)
+    )(Ks, Vs, Qs, pos)
 
     return Z_a
 
 
 def Block(xs: jax.Array, block_params: Params) -> jax.Array:
     r"""
-    block_params has keys:
-    input_layernorm.weight (1152,)
-    mlp.down_proj.weight (1152, 6912)
-    mlp.gate_proj.weight (6912, 1152)
-    mlp.up_proj.weight (6912, 1152)
-    post_attention_layernorm.weight (1152,)
-    post_feedforward_layernorm.weight (1152,)
-    pre_feedforward_layernorm.weight (1152,)
-    self_attn.k_norm.weight (256,)
-    self_attn.k_proj.weight (256, 1152)
-    self_attn.o_proj.weight (1152, 1024)
-    self_attn.q_norm.weight (256,)
-    self_attn.q_proj.weight (1024, 1152)
-    self_attn.v_proj.weight (256, 1152)
-
     Plan:
     1.  Input layernorm
     2.  Derive K,V and all four Q matrices.
@@ -169,6 +164,7 @@ def Block(xs: jax.Array, block_params: Params) -> jax.Array:
     pos = jnp.arange(0, sequence_len, 1, dtype=int)
 
     Ks, Vs, Qss = jax.vmap(preAttn, in_axes=(0, None, 0))(xs, block_params, pos)
+    Qss = jnp.transpose(Qss, (1, 0, 2))  # head dimension should be first
 
     # COMMUNICATION WITH OTHER TOKENS
     r"""
@@ -184,9 +180,10 @@ def Block(xs: jax.Array, block_params: Params) -> jax.Array:
     That would be easy enough for single head attention, but with four heads we have some extra level to take care of.
     """
     # first we go onto the level of individual heads
-    xs = jax.vmap(lambda Ks, Vs, Qs: attnHead(Ks, Vs, Qs), in_axes=(None, None, 0))(
-        Ks, Vs, Qss
-    )
+    xs = jax.vmap(
+        lambda Ks, Vs, Qs, idx: attnHead(Ks, Vs, Qs, idx), in_axes=(None, None, 0, None)
+    )(Ks, Vs, Qss, pos)
+    xs = jnp.transpose(xs, (1, 0, 2))  # (Seq, 4, 256)
     xs = jnp.reshape(xs, (sequence_len, 1024))
 
     xs = jax.vmap(postAttn, in_axes=(0, 0, None))(xs, xs_og, block_params)
