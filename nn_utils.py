@@ -12,39 +12,43 @@ def RMSNorm(x: jax.Array, gamma: jax.Array) -> jax.Array:
     return x / (jnp.sqrt(jnp.mean(jnp.square(x)) + epsilon)) * (1 + gamma)
 
 
-def RoPE(x: jax.Array, position: int) -> jax.Array:
+def RoPE(x: jax.Array, position: int, theta: float) -> jax.Array:
     """
-    Implemented by Gemini as I got annoyed with it.
-    Needs some optimization later, but good enough for now.
-    """
-    theta = 10000.0
+    Gemma-style RoPE matching the PyTorch reference you pasted (complex rotation
+    with half/half layout, not even/odd interleaving).
 
-    """
-    Gemma 3 Interleaved RoPE.
-    Inputs:
-        x: [head_dim]
-        position: current token index
-        theta: 10,000 for local, 1,000,000 for global
+    Args:
+        x: [head_dim] (e.g., 256)
+        position: token index (scalar)
+        theta: 10_000.0 (local) or 1_000_000.0 (global)
+
+    Returns:
+        Rotated x with same shape/dtype as input.
     """
     d = x.shape[-1]
+    if d % 2 != 0:
+        raise ValueError(f"RoPE requires even head_dim, got {d}")
 
-    # Calculate frequencies
-    # idx corresponds to [0, 2, 4, ..., d-2]
-    idx = jnp.arange(0, d, 2)
-    freqs = position / (theta ** (idx / d))
+    x_dtype = x.dtype
+    x_f = x.astype(jnp.float32)
 
-    # In PyTorch: torch.polar(ones, freqs)
-    # In JAX, we can use the interleaved rotation formula:
-    # x_rotated = [-x1, x0, -x3, x2, ...]
-    cos = jnp.repeat(jnp.cos(freqs), 2)
-    sin = jnp.repeat(jnp.sin(freqs), 2)
+    half = d // 2
+    x1 = x_f[:half]
+    x2 = x_f[half:]
 
-    # Interleave the rotation
-    x_even = x[0::2]
-    x_odd = x[1::2]
-    x_rotated = jnp.stack([-x_odd, x_even], axis=-1).flatten()
+    idx = jnp.arange(0, d, 2, dtype=jnp.float32)  # length = half
+    pos = jnp.asarray(position, dtype=jnp.float32)
+    freqs = pos / (theta ** (idx / d))  # length = half
 
-    return (x * cos) + (x_rotated * sin)
+    cos = jnp.cos(freqs)
+    sin = jnp.sin(freqs)
+
+    # Complex multiply: (x1 + i x2) * (cos + i sin)
+    y1 = x1 * cos - x2 * sin
+    y2 = x1 * sin + x2 * cos
+
+    y = jnp.concatenate([y1, y2], axis=-1)
+    return y.astype(x_dtype)
 
 
 def mlp(
@@ -63,17 +67,21 @@ def mlp(
 
 
 def preAttn(
-    x: jax.Array, block_params: Params, pos: jax.Array
+    x: jax.Array, block_params: Params, pos: jax.Array, theta
 ) -> tuple[jax.Array, jax.Array, jax.Array]:
     # Prepare for attention
     K = block_params["self_attn.k_proj.weight"] @ x
     K = RMSNorm(K, block_params["self_attn.k_norm.weight"])
-    K = RoPE(K, pos)
+    K = RoPE(K, pos, theta)
+
     V = block_params["self_attn.v_proj.weight"] @ x
+
     Qs = block_params["self_attn.q_proj.weight"] @ x
     Qs = jnp.reshape(Qs, (4, 256))
     Qs = jax.vmap(lambda Q: RMSNorm(Q, block_params["self_attn.q_norm.weight"]))(Qs)
-    Qs = jax.vmap(RoPE, in_axes=(0, None))(Qs, pos)
+    Qs = jax.vmap(lambda Q, p, theta: RoPE(Q, p, theta), in_axes=(0, None, None))(
+        Qs, pos, theta
+    )
 
     return K, V, Qs
 
@@ -132,7 +140,7 @@ def attnHead(Ks, Vs, Qs, pos) -> jax.Array:
     return Z_a
 
 
-def Block(xs: jax.Array, block_params: Params) -> jax.Array:
+def Block(xs: jax.Array, scans) -> jax.Array:
     r"""
     Plan:
     1.  Input layernorm
@@ -155,6 +163,8 @@ def Block(xs: jax.Array, block_params: Params) -> jax.Array:
     10. Layernorm
         (1152,)
     """
+    block_params, theta = scans
+
     # make a copy of x to keep the residual
     # maybe this should be done after the layernorm?
     xs_og = xs
@@ -165,7 +175,9 @@ def Block(xs: jax.Array, block_params: Params) -> jax.Array:
     sequence_len = xs.shape[0]
     pos = jnp.arange(0, sequence_len, 1, dtype=int)
 
-    Ks, Vs, Qss = jax.vmap(preAttn, in_axes=(0, None, 0))(xs, block_params, pos)
+    Ks, Vs, Qss = jax.vmap(preAttn, in_axes=(0, None, 0, None))(
+        xs, block_params, pos, theta
+    )
     Qss = jnp.transpose(Qss, (1, 0, 2))  # head dimension should be first
 
     # COMMUNICATION WITH OTHER TOKENS
@@ -218,9 +230,18 @@ def forward(xs: jax.Array, params: Params) -> jax.Array:
     """
     # embedding the tokens
     xs = jax.vmap(lambda x: jnp.transpose(params["model.embed_tokens.weight"]) @ x)(xs)
+    xs = jnp.sqrt(1152) * xs
 
     # BLOCKS
-    xs, _ = jax.lax.scan(Block, xs, block_params(params))
+    # Create the pattern list based on the config
+    # 26 layers total: (5 local, 1 global) * 4 + 2 local
+    layer_types = (["local"] * 5 + ["global"]) * 4 + ["local"] * 2
+
+    # Map to theta values
+    thetas = jnp.array(
+        [1_000_000.0 if t == "global" else 10_000.0 for t in layer_types]
+    )
+    xs, _ = jax.lax.scan(Block, xs, (block_params(params), thetas))
 
     # final norm
     xs = jax.vmap(RMSNorm, in_axes=(0, None))(xs, params["model.norm.weight"])
