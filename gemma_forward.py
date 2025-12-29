@@ -16,14 +16,6 @@ def RoPE(x: jax.Array, position: int, theta: float) -> jax.Array:
     """
     Gemma-style RoPE matching the PyTorch reference you pasted (complex rotation
     with half/half layout, not even/odd interleaving).
-
-    Args:
-        x: [head_dim] (e.g., 256)
-        position: token index (scalar)
-        theta: 10_000.0 (local) or 1_000_000.0 (global)
-
-    Returns:
-        Rotated x with same shape/dtype as input.
     """
     d = x.shape[-1]
     if d % 2 != 0:
