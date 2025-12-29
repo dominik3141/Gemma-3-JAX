@@ -56,9 +56,8 @@ def mlp(
     down_proj_weight: jax.Array,
     gate_proj_weight: jax.Array,
     up_proj_weight: jax.Array,
-    activation_fn,
 ) -> jax.Array:
-    x_a = activation_fn(gate_proj_weight @ x_0, approximate=True)
+    x_a = jax.nn.gelu(gate_proj_weight @ x_0, approximate=True)
     x_b = up_proj_weight @ x_0
     x = x_a * x_b  # elementwise multiplication
     x = down_proj_weight @ x
@@ -102,7 +101,6 @@ def postAttn(x: jax.Array, x_og: jax.Array, block_params: Params) -> jax.Array:
         block_params["mlp.down_proj.weight"],
         block_params["mlp.gate_proj.weight"],
         block_params["mlp.up_proj.weight"],
-        jax.nn.gelu,
     )
     x = RMSNorm(x, block_params["post_feedforward_layernorm.weight"])
     x = x + x_mlp_residual
