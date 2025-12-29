@@ -57,7 +57,7 @@ def mlp(
     return x
 
 
-def preAttn(
+def calc_qkv(
     x: jax.Array, block_params: Params, pos: jax.Array, is_local_attn: jax.Array
 ) -> tuple[jax.Array, jax.Array, jax.Array]:
     # Prepare for attention
@@ -166,10 +166,9 @@ def Block(xs: jax.Array, scans) -> jax.Array:
     sequence_len = xs.shape[0]
     pos = jnp.arange(0, sequence_len, 1, dtype=int)
 
-    Ks, Vs, Qss = jax.vmap(preAttn, in_axes=(0, None, 0, None))(
+    Ks, Vs, Qss = jax.vmap(calc_qkv, in_axes=(0, None, 0, None))(
         xs, block_params, pos, is_local_attn
     )
-    Qss = jnp.transpose(Qss, (1, 0, 2))  # head dimension should be first
 
     # COMMUNICATION WITH OTHER TOKENS
     r"""
@@ -185,6 +184,7 @@ def Block(xs: jax.Array, scans) -> jax.Array:
     That would be easy enough for single head attention, but with four heads we have some extra level to take care of.
     """
     # first we go onto the level of individual heads
+    Qss = jnp.transpose(Qss, (1, 0, 2))  # head dimension should be first
     xs = jax.vmap(
         lambda Ks, Vs, Qs, idx: attnHead(Ks, Vs, Qs, idx), in_axes=(None, None, 0, None)
     )(Ks, Vs, Qss, pos)
