@@ -58,7 +58,7 @@ def mlp(
     up_proj_weight: jax.Array,
     activation_fn,
 ) -> jax.Array:
-    x_a = activation_fn(gate_proj_weight @ x_0)
+    x_a = activation_fn(gate_proj_weight @ x_0, approximate=True)
     x_b = up_proj_weight @ x_0
     x = x_a * x_b  # elementwise multiplication
     x = down_proj_weight @ x
@@ -124,7 +124,7 @@ def Attn(Q_a: jax.Array, Ks: jax.Array, a: jax.Array) -> jax.Array:
     idx = jnp.arange(0, seq_len, 1)
     scores = jnp.where(idx <= a, scores, -jnp.inf)
 
-    return jax.nn.softmax(scores)
+    return jax.nn.softmax(scores.astype(jnp.float32)).astype(scores.dtype)
 
 
 def attnHead(Ks, Vs, Qs, pos) -> jax.Array:
