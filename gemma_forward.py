@@ -101,45 +101,49 @@ def postAttn(x: jax.Array, x_og: jax.Array, block_params: Params) -> jax.Array:
     return x
 
 
-def AttnScores(Q_a: jax.Array, Ks: jax.Array, idx_a: jax.Array) -> jax.Array:
+def AttnScores(
+    Q_a: jax.Array, Ks: jax.Array, idx_a: jax.Array, seq_indices
+) -> jax.Array:
     """
     Calculates masked attention scores.
     """
     d_k = Q_a.shape[0]
-    seq_len = Ks.shape[0]
     assert d_k == 256
 
     scores = (Q_a @ jnp.transpose(Ks)) / jnp.sqrt(d_k)
 
     # masking
-    idx = jnp.arange(0, seq_len, 1)
-    scores = jnp.where(idx <= idx_a, scores, -jnp.inf)
+    scores = jnp.where(seq_indices <= idx_a, scores, -jnp.inf)
 
     return jax.nn.softmax(scores.astype(jnp.float32)).astype(scores.dtype)
 
 
-def globalAttn(Ks, Vs, Qs, pos_a) -> jax.Array:
+def globalAttn(Ks, Vs, Qs, pos_a, seq_indices) -> jax.Array:
     """
     If we are inside a global attention layer, we can attend to all tokens.
     """
     return jax.vmap(
-        lambda Ks, Vs, Q_a, idx_a: AttnScores(Q_a, Ks, idx_a) @ Vs,
-        in_axes=(None, None, 0, 0),
-    )(Ks, Vs, Qs, pos_a)
+        lambda Ks, Vs, Q_a, idx_a, seq_indices: AttnScores(Q_a, Ks, idx_a, seq_indices)
+        @ Vs,
+        in_axes=(None, None, 0, 0, None),
+    )(Ks, Vs, Qs, pos_a, seq_indices)
 
 
-def localAttn(Ks, Vs, Qs, pos_a) -> jax.Array:
+def localAttn(Ks, Vs, Qs, pos_a, seq_indices) -> jax.Array:
     """
     If we are inside a local attention layer, we have to slice K and V so we only attend to the
     closest 1024 tokens.
     """
     return jax.vmap(
-        lambda Ks, Vs, Q_a, idx_a: AttnScores(
-            Q_a, jax.lax.dynamic_slice_in_dim(Ks, idx_a - 512, 1024), idx_a
+        lambda Ks, Vs, Q_a, idx_a, seq_indices: AttnScores(
+            Q_a,
+            jax.lax.dynamic_slice_in_dim(Ks, idx_a - 512, 1024),
+            idx_a,
+            jax.lax.dynamic_index_in_dim(seq_indices, idx_a - 512, 1024),
         )
         @ jax.lax.dynamic_slice_in_dim(Vs, idx_a - 512, 1024),
-        in_axes=(None, None, 0, 0),
-    )(Ks, Vs, Qs, pos_a)
+        in_axes=(None, None, 0, 0, None),
+    )(Ks, Vs, Qs, pos_a, seq_indices)
 
 
 def attnHead(Ks, Vs, Qs, pos_a, is_local_attn) -> jax.Array:
@@ -148,7 +152,10 @@ def attnHead(Ks, Vs, Qs, pos_a, is_local_attn) -> jax.Array:
     Z_a := \sum_b Attn(a,b) * V_b,
     where Attn(a,b) := softmax((Q_a K_b^T)/sqrt(d_k))
     """
-    Z_a = jax.lax.cond(is_local_attn, localAttn, globalAttn, Ks, Vs, Qs, pos_a)
+    seq_indices = jnp.arange(0, Ks.shape[0], 1)
+    Z_a = jax.lax.cond(
+        is_local_attn, localAttn, globalAttn, Ks, Vs, Qs, pos_a, seq_indices
+    )
 
     return Z_a
 
