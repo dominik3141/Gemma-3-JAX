@@ -3,7 +3,6 @@ from typing import Iterable
 
 import jax
 import jax.numpy as jnp
-import numpy as np
 import sentencepiece as spm
 from safetensors import safe_open
 
