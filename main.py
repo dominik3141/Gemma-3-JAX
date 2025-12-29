@@ -1,5 +1,12 @@
-from prompt import cli_main
+from gemma_forward import forward
+from inspect_weights import load_weights_as_dict
+import jax
+import jax.numpy as jnp
 
 
 if __name__ == "__main__":
-    cli_main()
+    params = load_weights_as_dict("model_stacked.safetensors")
+    xs = jnp.array([2, 153637, 532, 622])
+    xs = jax.nn.one_hot(xs, 262144)
+    xs = forward(xs, params)
+    print(xs)

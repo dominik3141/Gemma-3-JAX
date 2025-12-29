@@ -58,9 +58,10 @@ def mlp(
 
 
 def preAttn(
-    x: jax.Array, block_params: Params, pos: jax.Array, theta
+    x: jax.Array, block_params: Params, pos: jax.Array, is_local_attn: jax.Array
 ) -> tuple[jax.Array, jax.Array, jax.Array]:
     # Prepare for attention
+    theta = jnp.where(is_local_attn, 10_000.0, 1_000_000.0)
     K = block_params["self_attn.k_proj.weight"] @ x
     K = RMSNorm(K, block_params["self_attn.k_norm.weight"])
     K = RoPE(K, pos, theta)
@@ -153,7 +154,7 @@ def Block(xs: jax.Array, scans) -> jax.Array:
     10. Layernorm
         (1152,)
     """
-    block_params, theta = scans
+    block_params, is_local_attn = scans
 
     # make a copy of x to keep the residual
     # maybe this should be done after the layernorm?
@@ -166,7 +167,7 @@ def Block(xs: jax.Array, scans) -> jax.Array:
     pos = jnp.arange(0, sequence_len, 1, dtype=int)
 
     Ks, Vs, Qss = jax.vmap(preAttn, in_axes=(0, None, 0, None))(
-        xs, block_params, pos, theta
+        xs, block_params, pos, is_local_attn
     )
     Qss = jnp.transpose(Qss, (1, 0, 2))  # head dimension should be first
 
@@ -226,12 +227,10 @@ def forward(xs: jax.Array, params: Params) -> jax.Array:
     # Create the pattern list based on the config
     # 26 layers total: (5 local, 1 global) * 4 + 2 local
     layer_types = (["local"] * 5 + ["global"]) * 4 + ["local"] * 2
-
-    # Map to theta values
-    thetas = jnp.array(
-        [1_000_000.0 if t == "global" else 10_000.0 for t in layer_types]
-    )
-    xs, _ = jax.lax.scan(Block, xs, (block_params(params), thetas))
+    is_local_attn = jnp.array(
+        [t == "local" for t in layer_types]
+    )  # shape (26,), [1,1...,1,1]
+    xs, _ = jax.lax.scan(Block, xs, (block_params(params), is_local_attn))
 
     # final norm
     xs = jax.vmap(RMSNorm, in_axes=(0, None))(xs, params["model.norm.weight"])
