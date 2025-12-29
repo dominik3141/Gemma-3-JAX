@@ -7,7 +7,7 @@ import numpy as np
 import sentencepiece as spm
 from safetensors import safe_open
 
-from nn_utils import forward
+from gemma_forward import forward
 
 
 VOCAB_SIZE = 262_144
@@ -54,9 +54,7 @@ def format_prompt(prompt: str, template: str) -> str:
         return prompt
     if template == "gemma-instruct":
         return (
-            "<start_of_turn>user\n"
-            + prompt
-            + "\n<end_of_turn>\n<start_of_turn>model\n"
+            "<start_of_turn>user\n" + prompt + "\n<end_of_turn>\n<start_of_turn>model\n"
         )
     raise ValueError(f"Unknown template '{template}'")
 
@@ -102,7 +100,9 @@ def cli_main() -> None:
     parser = argparse.ArgumentParser(
         description="Sample autoregressively from the Gemma 1B model."
     )
-    parser.add_argument("--prompt", type=str, default="Hello", help="Input prompt text.")
+    parser.add_argument(
+        "--prompt", type=str, default="Hello", help="Input prompt text."
+    )
     parser.add_argument(
         "--weights",
         type=str,
