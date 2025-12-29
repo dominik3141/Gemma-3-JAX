@@ -9,7 +9,7 @@ def RMSNorm(x: jax.Array, gamma: jax.Array) -> jax.Array:
     # the weights for this norm are simply named '*layernorm*'
     # x and gamma should have the same shape
     epsilon = 1e-6
-    return x / (jnp.sqrt(jnp.mean(jnp.square(x)) + epsilon)) * gamma
+    return x / (jnp.sqrt(jnp.mean(jnp.square(x)) + epsilon)) * (1 + gamma)
 
 
 def RoPE(x: jax.Array, position: int) -> jax.Array:
@@ -94,8 +94,8 @@ def postAttn(x: jax.Array, x_og: jax.Array, block_params: Params) -> jax.Array:
         block_params["mlp.up_proj.weight"],
         jax.nn.gelu,
     )
-    x = x + x_mlp_residual
     x = RMSNorm(x, block_params["post_feedforward_layernorm.weight"])
+    x = x + x_mlp_residual
 
     return x
 
@@ -210,20 +210,15 @@ def forward(xs: jax.Array, params: Params) -> jax.Array:
     Plan:
     1.  Embedd the tokens
         (seq_len, 262144) -> (seq_len, 1152)
-    2.  Shift left
+    2.  Iterate over blocks
         (seq_len, 1152) -> (seq_len, 1152)
-    3.  Iterate over blocks
+    3.  Final norm
         (seq_len, 1152) -> (seq_len, 1152)
-    4.  Final norm
-        (seq_len, 1152) -> (seq_len, 1152)
-    5.  Map to logits
+    4.  Map to logits
         (seq_len, 1152) -> (seq_len, 262144)
     """
     # embedding the tokens
     xs = jax.vmap(lambda x: jnp.transpose(params["model.embed_tokens.weight"]) @ x)(xs)
-
-    # shift left
-    xs = jnp.concat([xs[1:], jnp.zeros_like(xs[:1])])
 
     # BLOCKS
     xs, _ = jax.lax.scan(Block, xs, block_params(params))

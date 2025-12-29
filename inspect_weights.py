@@ -21,3 +21,5 @@ if __name__ == "__main__":
     weights = load_weights_as_dict("model_stacked.safetensors")
     for key in weights.keys():
         print(key, weights[key].shape)
+
+    print(weights["model.layers_stacked.input_layernorm.weight"])
