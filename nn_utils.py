@@ -17,30 +17,32 @@ def RoPE(x: jax.Array, position: int) -> jax.Array:
     Implemented by Gemini as I got annoyed with it.
     Needs some optimization later, but good enough for now.
     """
-    theta_base = 10000.0
+    theta = 10000.0
 
-    # head_dim is the last dimension of our tensor
+    """
+    Gemma 3 Interleaved RoPE.
+    Inputs:
+        x: [head_dim]
+        position: current token index
+        theta: 10,000 for local, 1,000,000 for global
+    """
     d = x.shape[-1]
 
-    # Compute the frequency constants for the dimensions
-    # We only need d//2 frequencies because we work in 2D planes
+    # Calculate frequencies
+    # idx corresponds to [0, 2, 4, ..., d-2]
     idx = jnp.arange(0, d, 2)
-    freqs = position / (theta_base ** (idx / d))
+    freqs = position / (theta ** (idx / d))
 
-    # Calculate cos and sin components
-    # We repeat them to match the full head_dim
-    cos = jnp.cos(jnp.concatenate([freqs, freqs], axis=-1))
-    sin = jnp.sin(jnp.concatenate([freqs, freqs], axis=-1))
+    # In PyTorch: torch.polar(ones, freqs)
+    # In JAX, we can use the interleaved rotation formula:
+    # x_rotated = [-x1, x0, -x3, x2, ...]
+    cos = jnp.repeat(jnp.cos(freqs), 2)
+    sin = jnp.repeat(jnp.sin(freqs), 2)
 
-    # Split x into [x_left, x_right] to perform the rotation
-    # For a vector [x1, x2, x3, x4], x_left is [x1, x2], x_right is [x3, x4]
-    half = d // 2
-    x_left = x[..., :half]
-    x_right = x[..., half:]
-
-    # The 'rotated' part of the formula: [-x_right, x_left]
-    # This corresponds to the complex rotation (x + iy) * (cos + isin)
-    x_rotated = jnp.concatenate([-x_right, x_left], axis=-1)
+    # Interleave the rotation
+    x_even = x[0::2]
+    x_odd = x[1::2]
+    x_rotated = jnp.stack([-x_odd, x_even], axis=-1).flatten()
 
     return (x * cos) + (x_rotated * sin)
 
