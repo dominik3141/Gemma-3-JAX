@@ -244,14 +244,14 @@ def forward(xs: jax.Array, params: Params) -> jax.Array:
     we use 0 as the padding token (not our decision)
 
     Plan:
-    0.  Padding
-    1.  Embed the tokens
+    1.  Padding
+    2.  Embed the tokens
         (seq_len, ) -> (seq_len, 1152)
-    2.  Iterate over blocks
+    3.  Iterate over blocks
         (seq_len, 1152) -> (seq_len, 1152)
-    3.  Final norm
+    4.  Final norm
         (seq_len, 1152) -> (seq_len, 1152)
-    4.  Map to logits
+    5.  Map to logits
         (seq_len, 1152) -> (seq_len, 262144)
     """
     # Padding
