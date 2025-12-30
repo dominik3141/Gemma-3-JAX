@@ -112,7 +112,7 @@ def AttnScores(
 
     scores = (Q_a @ jnp.transpose(Ks)) / jnp.sqrt(d_k)
 
-    # masking
+    # causal masking
     scores = jnp.where(seq_indices <= idx_a, scores, -jnp.inf)
 
     return jax.nn.softmax(scores.astype(jnp.float32)).astype(scores.dtype)
@@ -139,7 +139,7 @@ def localAttn(Ks, Vs, Qs, pos_a, seq_indices) -> jax.Array:
             Q_a,
             jax.lax.dynamic_slice_in_dim(Ks, idx_a - 512, 1024),
             idx_a,
-            jax.lax.dynamic_index_in_dim(seq_indices, idx_a - 512, 1024),
+            jax.lax.dynamic_slice_in_dim(seq_indices, idx_a - 512, 1024),
         )
         @ jax.lax.dynamic_slice_in_dim(Vs, idx_a - 512, 1024),
         in_axes=(None, None, 0, 0, None),
