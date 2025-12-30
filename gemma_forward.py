@@ -259,7 +259,7 @@ def forward(xs: jax.Array, params: Params) -> jax.Array:
     # that there are enough tokens for proper dynamic slicing during the local attention
     # layers
     input_length = xs.shape[0]
-    xs = jnp.concat([xs, jnp.zeros_like(xs, shape=(1024 - input_length,))])
+    xs = jnp.concatenate([xs, jnp.zeros_like(xs, shape=(1024 - input_length,))])
 
     # embedding the tokens
     xs = jax.vmap(lambda x: params["model.embed_tokens.weight"][x], in_axes=(0))(xs)

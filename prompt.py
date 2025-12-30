@@ -84,8 +84,7 @@ def generate(
     rng = jax.random.PRNGKey(seed)
 
     for _ in range(max_new_tokens):
-        xs = one_hot_tokens(token_ids)
-        logits = forward(xs, params)
+        logits = forward(token_ids, params)
         next_logits = logits[-1]
         next_token, rng = sample_next_token(next_logits, rng, temperature)
         token_ids.append(next_token)
