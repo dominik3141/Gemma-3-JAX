@@ -10,8 +10,7 @@ This is very much a work in progress, but the current code already samples not o
 
 ## ToDo
 
-1. Differentiate properly between global and local attention layers, so far we only adjust the RoPE's theta to get a working model within the local context window. Things will break as soon as we go beyond 1024 tokens.
-2. KV caching
-3. Flash attention
-4. Masking of padding tokens
-5. All other inference optimizations I can come up with
+1. KV caching
+2. Flash attention
+3. Masking of padding tokens
+4. All other inference optimizations I can come up with
