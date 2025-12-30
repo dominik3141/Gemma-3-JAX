@@ -1,5 +1,4 @@
 import argparse
-from typing import Iterable
 
 import jax
 import jax.numpy as jnp
@@ -28,11 +27,6 @@ def load_tokenizer(model_path: str) -> spm.SentencePieceProcessor:
     sp = spm.SentencePieceProcessor()
     sp.Load(model_path)
     return sp
-
-
-def one_hot_tokens(token_ids: Iterable[int]) -> jax.Array:
-    ids = jnp.asarray(list(token_ids), dtype=jnp.int32)
-    return jax.nn.one_hot(ids, VOCAB_SIZE, dtype=jnp.float32)
 
 
 def sample_next_token(
@@ -84,8 +78,10 @@ def generate(
     rng = jax.random.PRNGKey(seed)
 
     for _ in range(max_new_tokens):
-        logits = forward(token_ids, params)
-        next_logits = logits[-1]
+        xs = jnp.asarray(token_ids, dtype=jnp.int32)
+
+        logits = forward(xs, params)
+        next_logits = logits[len(token_ids) - 1]  # pick logits for last real token
         next_token, rng = sample_next_token(next_logits, rng, temperature)
         token_ids.append(next_token)
         if stop_set and next_token in stop_set:
