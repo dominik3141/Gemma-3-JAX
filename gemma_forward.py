@@ -239,9 +239,14 @@ def block_params(params: Params) -> Params:
 
 def forward(xs: jax.Array, params: Params) -> jax.Array:
     r"""
+    Input is a sequence of ids, each referencing a specific token in vocab
+    i.e. [1233, 12, 83238, ....]
+    we use 0 as the padding token (not our decision)
+
     Plan:
-    1.  Embedd the tokens
-        (seq_len, 262144) -> (seq_len, 1152)
+    0.  Padding
+    1.  Embed the tokens
+        (seq_len, ) -> (seq_len, 1152)
     2.  Iterate over blocks
         (seq_len, 1152) -> (seq_len, 1152)
     3.  Final norm
@@ -249,8 +254,17 @@ def forward(xs: jax.Array, params: Params) -> jax.Array:
     4.  Map to logits
         (seq_len, 1152) -> (seq_len, 262144)
     """
+    # Padding
+    # we enforce a minimum sequence length of 1024 tokens in order to guarantee
+    # that there are enough tokens for proper dynamic slicing during the local attention
+    # layers
+    input_length = xs.shape[0]
+    xs = jnp.concat([xs, jnp.zeros_like(xs, shape=(1024 - input_length,))])
+
     # embedding the tokens
-    xs = jax.vmap(lambda x: jnp.transpose(params["model.embed_tokens.weight"]) @ x)(xs)
+    xs = jax.vmap(lambda x: params["model.embed_tokens.weight"][x], in_axes=(0))(xs)
+
+    # normalize according to Gemma reference implementation
     xs = jnp.sqrt(1152) * xs
 
     # BLOCKS
