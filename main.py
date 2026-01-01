@@ -9,7 +9,7 @@ if __name__ == "__main__":
     params = {k: jnp.array(v) for k, v in params.items()}
 
     # initialize an empty kv cache
-    kv_cache = jnp.zeros((26, 0, 2, 256))
+    kv_cache = jnp.zeros((26, 0, 2, 256), dtype=jnp.bfloat16)
 
     xs = jnp.array([2, 153637, 532, 622])
     xs = forward(xs, params, kv_cache)
