@@ -201,16 +201,15 @@ def Block(xs: jax.Array, scans) -> jax.Array:
     prev_seq_len = kv_cache.shape[0]
 
     # calculate Q, K, V for new tokens
-    xs_new = xs[prev_seq_len:]
     Ks, Vs, Qss = jax.vmap(calc_qkv, in_axes=(0, None, 0, None))(
-        xs_new, block_params, pos, is_local_attn
+        xs[prev_seq_len:], block_params, pos[prev_seq_len:], is_local_attn
     )
 
     # concat new and cached
     k_cached = jnp.transpose(kv_cache, (1, 0, 2))[0]
     v_cached = jnp.transpose(kv_cache, (1, 0, 2))[1]
-    Ks = jnp.concatenate([Ks, k_cached])
-    Vs = jnp.concatenate([Vs, v_cached])
+    Ks = jnp.concatenate([k_cached, Ks])
+    Vs = jnp.concatenate([v_cached, Vs])
 
     # COMMUNICATION WITH OTHER TOKENS
     r"""
