@@ -184,7 +184,7 @@ def Block(xs: jax.Array, scans) -> jax.Array:
         (1152,)
     """
     block_params, is_local_attn, kv_cache = scans
-    # kv_cache has shape [prev_seq_len, 2]
+    # kv_cache has shape [prev_seq_len, 2, 256]
 
     # make a copy of x to keep the residual
     # maybe this should be done after the layernorm?
@@ -207,8 +207,8 @@ def Block(xs: jax.Array, scans) -> jax.Array:
     )
 
     # concat new and cached
-    k_cached = jnp.transpose(kv_cache, (1, 0))[0]
-    v_cached = jnp.transpose(kv_cache, (1, 0))[1]
+    k_cached = jnp.transpose(kv_cache, (1, 0, 2))[0]
+    v_cached = jnp.transpose(kv_cache, (1, 0, 2))[1]
     Ks = jnp.concatenate([Ks, k_cached])
     Vs = jnp.concatenate([Vs, v_cached])
 
@@ -259,7 +259,7 @@ def block_params(params: Params) -> Params:
 
 r"""
 The KV cache should be a jax.Array of shape
-(26 [BLOCK], prev_seq_len, 2 [K,V])
+(26 [BLOCK], prev_seq_len, 2 [K,V], 256)
 """
 
 
