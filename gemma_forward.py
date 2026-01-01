@@ -183,7 +183,8 @@ def Block(xs: jax.Array, scans) -> jax.Array:
     10. Layernorm
         (1152,)
     """
-    block_params, is_local_attn = scans
+    block_params, is_local_attn, kv_cache = scans
+    # kv_cache has shape [prev_seq_len, 2]
 
     # make a copy of x to keep the residual
     # maybe this should be done after the layernorm?
@@ -195,9 +196,21 @@ def Block(xs: jax.Array, scans) -> jax.Array:
     sequence_len = xs.shape[0]
     pos = jnp.arange(0, sequence_len, 1, dtype=int)
 
+    # first we determine for which elements we really have to calculate new q, k, v
+    # vs for which tokens we have cached values
+    prev_seq_len = kv_cache.shape[0]
+
+    # calculate Q, K, V for new tokens
+    xs_new = xs[prev_seq_len:]
     Ks, Vs, Qss = jax.vmap(calc_qkv, in_axes=(0, None, 0, None))(
-        xs, block_params, pos, is_local_attn
+        xs_new, block_params, pos, is_local_attn
     )
+
+    # concat new and cached
+    k_cached = jnp.transpose(kv_cache, (1, 0))[0]
+    v_cached = jnp.transpose(kv_cache, (1, 0))[1]
+    Ks = jnp.concatenate([Ks, k_cached])
+    Vs = jnp.concatenate([Vs, v_cached])
 
     # COMMUNICATION WITH OTHER TOKENS
     r"""
@@ -212,6 +225,13 @@ def Block(xs: jax.Array, scans) -> jax.Array:
 
     That would be easy enough for single head attention, but with four heads we have some extra level to take care of.
     """
+    # Make sure we only enrich new tokens, no need to waste time on tokens that aren't relevant
+    # to predict the next unknown one during pure inference.
+    # This should be pretty simple in our setup as we only have to put it a more limited number of
+    # queries.
+    # I guess this is were we arrive at the real first difference between pure inference vs forward
+    # during a training run
+
     # first we go onto the level of individual heads
     Qss = jnp.transpose(Qss, (1, 0, 2))  # head dimension should be first
     xs = jax.vmap(
@@ -237,7 +257,13 @@ def block_params(params: Params) -> Params:
     return block_params
 
 
-def forward(xs: jax.Array, params: Params) -> jax.Array:
+r"""
+The KV cache should be a jax.Array of shape
+(26 [BLOCK], prev_seq_len, 2 [K,V])
+"""
+
+
+def forward(xs: jax.Array, params: Params, kv_cache: jax.Array) -> jax.Array:
     r"""
     Input is a sequence of ids, each referencing a specific token in vocab
     i.e. [1233, 12, 83238, ....]
@@ -275,7 +301,7 @@ def forward(xs: jax.Array, params: Params) -> jax.Array:
     is_local_attn = jnp.array(
         [t == "local" for t in layer_types]
     )  # shape (26,), [1,1...,1,1]
-    xs, _ = jax.lax.scan(Block, xs, (block_params(params), is_local_attn))
+    xs, _ = jax.lax.scan(Block, xs, (block_params(params), is_local_attn, kv_cache))
 
     # final norm
     xs = jax.vmap(RMSNorm, in_axes=(0, None))(xs, params["model.norm.weight"])
