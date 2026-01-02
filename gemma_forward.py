@@ -160,7 +160,7 @@ def attnHead(Ks, Vs, Qs, pos_a, is_local_attn) -> jax.Array:
     return Z_a
 
 
-def Block(xs: jax.Array, scans) -> jax.Array:
+def Block(initials, scans) -> jax.Array:
     r"""
     Plan:
     1.  Input layernorm
@@ -183,6 +183,8 @@ def Block(xs: jax.Array, scans) -> jax.Array:
     10. Layernorm
         (1152,)
     """
+    xs, sequence_length = initials
+
     block_params, is_local_attn, kv_cache = scans
     # kv_cache has shape [prev_seq_len, 2, 256]
 
@@ -193,8 +195,8 @@ def Block(xs: jax.Array, scans) -> jax.Array:
 
     # we need to also keep track of a tokens position within the sequence of tokens so that we can calculate the
     # positional embedding
-    sequence_len = xs.shape[0]
-    pos = jnp.arange(0, sequence_len, 1, dtype=int)
+    padded_sequence_len = xs.shape[0]
+    pos = jnp.arange(0, padded_sequence_len, 1, dtype=int)
 
     # first we determine for which elements we really have to calculate new q, k, v
     # vs for which tokens we have cached values
@@ -212,7 +214,8 @@ def Block(xs: jax.Array, scans) -> jax.Array:
     Vs = jnp.concatenate([v_cached, Vs])
 
     # store new cached K,V (shape: (seq_len, 2, 256))
-    new_kv_cache = jnp.stack([Ks, Vs], axis=1)
+    # we have to make sure to exclude the padding here
+    new_kv_cache = jnp.stack([Ks[:sequence_length], Vs[:sequence_length]], axis=1)
 
     # COMMUNICATION WITH OTHER TOKENS
     r"""
@@ -241,7 +244,7 @@ def Block(xs: jax.Array, scans) -> jax.Array:
         in_axes=(None, None, 0, None, None),
     )(Ks, Vs, Qss, pos, is_local_attn)
     xs = jnp.transpose(xs, (1, 0, 2))  # (Seq, 4, 256)
-    xs = jnp.reshape(xs, (sequence_len, 1024))
+    xs = jnp.reshape(xs, (padded_sequence_len, 1024))
 
     xs = jax.vmap(postAttn, in_axes=(0, 0, None))(xs, xs_og, block_params)
 
@@ -304,7 +307,7 @@ def forward(xs: jax.Array, params: Params, kv_cache: jax.Array) -> jax.Array:
         [t == "local" for t in layer_types]
     )  # shape (26,), [1,1...,1,1]
     xs, new_kv_cache = jax.lax.scan(
-        Block, xs, (block_params(params), is_local_attn, kv_cache)
+        Block, (xs, input_length), (block_params(params), is_local_attn, kv_cache)
     )
 
     # final norm
