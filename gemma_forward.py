@@ -211,6 +211,9 @@ def Block(xs: jax.Array, scans) -> jax.Array:
     Ks = jnp.concatenate([k_cached, Ks])
     Vs = jnp.concatenate([v_cached, Vs])
 
+    # store new cached K,V (shape: (seq_len, 2, 256))
+    new_kv_cache = jnp.stack([Ks, Vs], axis=1)
+
     # COMMUNICATION WITH OTHER TOKENS
     r"""
     The usual representation of the attention formula hides a lot of interesting stuff behind matrix operations,
@@ -242,7 +245,7 @@ def Block(xs: jax.Array, scans) -> jax.Array:
 
     xs = jax.vmap(postAttn, in_axes=(0, 0, None))(xs, xs_og, block_params)
 
-    return xs, None
+    return xs, new_kv_cache
 
 
 def block_params(params: Params) -> Params:
@@ -300,7 +303,9 @@ def forward(xs: jax.Array, params: Params, kv_cache: jax.Array) -> jax.Array:
     is_local_attn = jnp.array(
         [t == "local" for t in layer_types]
     )  # shape (26,), [1,1...,1,1]
-    xs, _ = jax.lax.scan(Block, xs, (block_params(params), is_local_attn, kv_cache))
+    xs, new_kv_cache = jax.lax.scan(
+        Block, xs, (block_params(params), is_local_attn, kv_cache)
+    )
 
     # final norm
     xs = jax.vmap(RMSNorm, in_axes=(0, None))(xs, params["model.norm.weight"])
