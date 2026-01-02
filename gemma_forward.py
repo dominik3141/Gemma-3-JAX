@@ -108,7 +108,6 @@ def AttnScores(
     Calculates masked attention scores.
     """
     d_k = Q_a.shape[0]
-    assert d_k == 256
 
     scores = (Q_a @ jnp.transpose(Ks)) / jnp.sqrt(d_k)
 
