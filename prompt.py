@@ -61,10 +61,13 @@ def generate(
     temperature: float = 0.8,
     seed: int = 0,
     stop_ids: set[int] | None = None,
-    template: str = "gemma-instruct",
+    template: str = "plain",
+    add_bos: bool = True,
 ) -> tuple[list[int], set[int], int]:
     formatted = format_prompt(prompt, template)
-    token_ids: list[int] = [BOS_ID] + tokenizer.EncodeAsIds(formatted)
+    token_ids: list[int] = tokenizer.EncodeAsIds(formatted)
+    if add_bos:
+        token_ids = [BOS_ID] + token_ids
     prompt_len = len(token_ids)
     stop_set = set(stop_ids) if stop_ids is not None else set(STOP_IDS_DEFAULT)
     rng = jax.random.PRNGKey(seed)
@@ -137,14 +140,20 @@ def cli_main() -> None:
         help="Do not stop early on <end_of_turn>.",
     )
     parser.add_argument(
+        "--no-bos",
+        action="store_true",
+        help="Do not prepend a BOS token.",
+    )
+    parser.add_argument(
         "--template",
         choices=["plain", "gemma-instruct"],
-        default="gemma-instruct",
-        help="Prompt formatting template.",
+        default=None,
+        help="Prompt formatting template (defaults based on --mode).",
     )
     args = parser.parse_args()
 
     weights_path = args.weights or f"model_stacked_{args.mode}.safetensors"
+    template = args.template or ("gemma-instruct" if args.mode == "it" else "plain")
 
     tokenizer = load_tokenizer(args.tokenizer)
     params = load_weights_as_dict(weights_path)
@@ -152,7 +161,7 @@ def cli_main() -> None:
     stop_ids: set[int] = set()
     if not args.no_eos_stop:
         stop_ids.add(EOS_ID)
-    if not args.no_end_of_turn_stop:
+    if not args.no_end_of_turn_stop and args.mode == "it":
         stop_ids.add(END_OF_TURN_ID)
 
     generated, used_stop_ids, prompt_len = generate(
@@ -163,7 +172,8 @@ def cli_main() -> None:
         temperature=args.temperature,
         seed=args.seed,
         stop_ids=stop_ids,
-        template=args.template,
+        template=template,
+        add_bos=not args.no_bos,
     )
 
     gen_only = generated[prompt_len:]
