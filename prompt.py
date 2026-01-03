@@ -3,9 +3,9 @@ import argparse
 import jax
 import jax.numpy as jnp
 import sentencepiece as spm
-from safetensors import safe_open
 
 from gemma_forward import forward
+from inspect_weights import load_weights_as_dict
 
 
 VOCAB_SIZE = 262_144
@@ -13,14 +13,6 @@ BOS_ID = 2
 EOS_ID = 1
 END_OF_TURN_ID = 106  # tokenizer.piece_to_id("<end_of_turn>")
 STOP_IDS_DEFAULT = (EOS_ID, END_OF_TURN_ID)
-
-
-def load_weights_as_jax(path: str) -> dict[str, jax.Array]:
-    params: dict[str, jax.Array] = {}
-    with safe_open(path, framework="np", device="cpu") as f:
-        for key in f.keys():
-            params[key] = jnp.asarray(f.get_tensor(key))
-    return params
 
 
 def load_tokenizer(model_path: str) -> spm.SentencePieceProcessor:
@@ -146,7 +138,7 @@ def cli_main() -> None:
     args = parser.parse_args()
 
     tokenizer = load_tokenizer(args.tokenizer)
-    params = load_weights_as_jax(args.weights)
+    params = load_weights_as_dict(args.weights)
 
     stop_ids: set[int] = set()
     if not args.no_eos_stop:
