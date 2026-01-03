@@ -90,10 +90,17 @@ def cli_main() -> None:
         "--prompt", type=str, default="Hello", help="Input prompt text."
     )
     parser.add_argument(
+        "-m",
+        "--mode",
+        choices=["it", "pt"],
+        default="it",
+        help="Model mode: 'it' for instruction-trained, 'pt' for pretrained.",
+    )
+    parser.add_argument(
         "--weights",
         type=str,
-        default="model_stacked.safetensors",
-        help="Path to the stacked safetensors weights.",
+        default=None,
+        help="Path to the stacked safetensors weights (overrides --mode).",
     )
     parser.add_argument(
         "--tokenizer",
@@ -137,8 +144,10 @@ def cli_main() -> None:
     )
     args = parser.parse_args()
 
+    weights_path = args.weights or f"model_stacked_{args.mode}.safetensors"
+
     tokenizer = load_tokenizer(args.tokenizer)
-    params = load_weights_as_dict(args.weights)
+    params = load_weights_as_dict(weights_path)
 
     stop_ids: set[int] = set()
     if not args.no_eos_stop:
