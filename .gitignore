@@ -10,8 +10,10 @@ wheels/
 # Virtual environments
 .venv
 
-model.safetensors
-model_stacked.safetensors
+model_pt.safetensors
+model_stacked_pt.safetensors
+model_it.safetensors
+model_stacked_it.safetensors
 tokenizer.json
 tokenizer.model
 tokenizer.json
