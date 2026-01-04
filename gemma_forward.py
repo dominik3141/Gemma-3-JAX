@@ -237,7 +237,8 @@ def block_params(params: Params) -> Params:
     return block_params
 
 
-def forward(xss: jax.Array, params: Params) -> jax.Array:
+@jax.jit
+def forward(xs: jax.Array, params: Params) -> jax.Array:
     r"""
     Input is a sequence of ids, each referencing a specific token in vocab
     i.e. [1233, 12, 83238, ....]
@@ -254,39 +255,33 @@ def forward(xss: jax.Array, params: Params) -> jax.Array:
     5.  Map to logits
         (seq_len, 1152) -> (seq_len, 262144)
     """
+    # Padding
+    # we enforce a minimum sequence length of 1024 tokens in order to guarantee
+    # that there are enough tokens for proper dynamic slicing during the local attention
+    # layers
+    input_length = xs.shape[0]
+    padding_tokens = max(0, 1024 - input_length)
+    xs = jnp.concatenate([xs, jnp.zeros_like(xs, shape=(padding_tokens,))])
 
+    # embedding the tokens
+    xs = jax.vmap(lambda x: params["model.embed_tokens.weight"][x], in_axes=(0))(xs)
+
+    # normalize according to Gemma reference implementation
+    xs = jnp.sqrt(1152) * xs
+
+    # BLOCKS
+    # Create the pattern list based on the config
+    # 26 layers total: (5 local, 1 global) * 4 + 2 local
     layer_types = (["local"] * 5 + ["global"]) * 4 + ["local"] * 2
     is_local_attn = jnp.array(
         [t == "local" for t in layer_types]
     )  # shape (26,), [1,1...,1,1]
+    xs, _ = jax.lax.scan(Block, xs, (block_params(params), is_local_attn))
 
-    @jax.jit
-    def forward_single(xs: jax.Array, params) -> jax.Array:
-        # Padding
-        # we enforce a minimum sequence length of 1024 tokens in order to guarantee
-        # that there are enough tokens for proper dynamic slicing during the local attention
-        # layers
-        input_length = xs.shape[0]
-        padding_tokens = max(0, 1024 - input_length)
-        xs = jnp.concatenate([xs, jnp.zeros_like(xs, shape=(padding_tokens,))])
+    # final norm
+    xs = jax.vmap(RMSNorm, in_axes=(0, None))(xs, params["model.norm.weight"])
 
-        # embedding the tokens
-        xs = jax.vmap(lambda x: params["model.embed_tokens.weight"][x], in_axes=(0))(xs)
+    # map to logits
+    xs = jax.vmap(lambda x: params["model.embed_tokens.weight"] @ x)(xs)
 
-        # normalize according to Gemma reference implementation
-        xs = jnp.sqrt(1152) * xs
-
-        # BLOCKS
-        # Create the pattern list based on the config
-        # 26 layers total: (5 local, 1 global) * 4 + 2 local
-        xs, _ = jax.lax.scan(Block, xs, (block_params(params), is_local_attn))
-
-        # final norm
-        xs = jax.vmap(RMSNorm, in_axes=(0, None))(xs, params["model.norm.weight"])
-
-        # map to logits
-        xs = jax.vmap(lambda x: params["model.embed_tokens.weight"] @ x)(xs)
-
-        return xs
-
-    return jax.vmap(forward_single, in_axes=(0, None))(xss, params)
+    return xs
