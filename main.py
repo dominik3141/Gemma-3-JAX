@@ -4,7 +4,7 @@ import jax.numpy as jnp
 
 
 if __name__ == "__main__":
-    params = load_weights_as_dict("model_stacked.safetensors")
+    params = load_weights_as_dict("model_stacked_it.safetensors")
 
     xs = jnp.array([2, 153637, 532, 622])
     xs = forward(xs, params)
