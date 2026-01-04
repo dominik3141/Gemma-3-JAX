@@ -18,3 +18,5 @@ tokenizer.json
 tokenizer.model
 tokenizer.json
 prompt.ipynb
+shakespeare.txt
+shakespeare_tokenized.npz
