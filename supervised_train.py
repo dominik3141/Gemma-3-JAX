@@ -49,8 +49,12 @@ def train(key, batch_size, params, seq_length) -> Params:
 
 
 # TESTING
-if __name__ == "__main__":
+def main():
     key = jax.random.key(42)
     params = load_weights_as_dict("model_stacked_pt.safetensors")
 
     print(train(key, 2, params, 4))
+
+
+if __name__ == "__main__":
+    main()
