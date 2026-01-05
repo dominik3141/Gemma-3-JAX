@@ -18,6 +18,7 @@ But for now we just always take sequences of the same length to avoid this probl
 
 import jax
 
+# init distributed training communications (blocking)
 jax.distributed.initialize()  # must happen before the train_data import, therefore moved to top
 
 import jax.numpy as jnp
@@ -68,9 +69,6 @@ from jax.experimental import mesh_utils
 
 # TESTING
 def main():
-    # init distributed training communications (blocking)
-    # jax.distributed.initialize() # must happen before the train_data import, therefore moved to top
-
     # keys and parameters
     key = jax.random.key(42)
     params = load_weights_as_dict("model_stacked_pt.safetensors")

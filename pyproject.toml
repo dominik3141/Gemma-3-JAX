@@ -13,3 +13,6 @@ dependencies = [
     "safetensors>=0.7.0",
     "sentencepiece>=0.2.1",
 ]
+
+[tool.ruff.lint]
+ignore = ["E402"]
