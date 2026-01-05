@@ -38,14 +38,19 @@ def SGD(params, grads, lr) -> Params:
     return jax.tree_util.tree_map(lambda param, grad: param - lr * grad, params, grads)
 
 
-def train(key, batch_size, params, seq_length, lr) -> Params:
+def train(key, batch_size, params, seq_length, lr) -> tuple[Params, jax.Array]:
     def loss_batched(xss, params) -> jax.Array:
         return jnp.mean(jax.vmap(loss_fn, in_axes=(0, None))(xss, params))
 
     train_data = get_training_batch(key, batch_size, seq_length)
     loss, grads = jax.value_and_grad(loss_batched, argnums=1)(train_data, params)
-    print(loss)
-    return SGD(params, grads, lr)
+    return SGD(params, grads, lr), loss
+
+
+def train_loop(params, key) -> tuple[Params, jax.Array]:
+    new_params, loss = train(key, 2, params, 4, 0.01)
+
+    return new_params, loss
 
 
 # TESTING
@@ -53,7 +58,9 @@ def main():
     key = jax.random.key(42)
     params = load_weights_as_dict("model_stacked_pt.safetensors")
 
-    print(train(key, 2, params, 4, 0.01))
+    keys = jax.random.split(key, 1000)
+
+    final_params, losses = jax.lax.scan(train_loop, params, keys)
 
 
 if __name__ == "__main__":
