@@ -9,6 +9,7 @@ dependencies = [
     "ml-dtypes>=0.5.4",
     "numpy>=2.4.0",
     "optax>=0.2.6",
+    "rich>=14.2.0",
     "safetensors>=0.7.0",
     "sentencepiece>=0.2.1",
 ]
