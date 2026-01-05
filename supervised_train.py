@@ -58,9 +58,10 @@ def main():
     key = jax.random.key(42)
     params = load_weights_as_dict("model_stacked_pt.safetensors")
 
-    keys = jax.random.split(key, 1000)
-
-    final_params, losses = jax.lax.scan(train_loop, params, keys)
+    keys = jax.random.split(key, 2000)
+    params, losses = jax.lax.scan(train_loop, params, keys)
+    print("XLA retuned control")
+    print(losses)
 
 
 if __name__ == "__main__":
