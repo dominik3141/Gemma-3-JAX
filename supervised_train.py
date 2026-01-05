@@ -17,7 +17,8 @@ But for now we just always take sequences of the same length to avoid this probl
 """
 
 import jax
-jax.distributed.initialize() # must happen before the train_data import, therefore moved to top
+
+jax.distributed.initialize()  # must happen before the train_data import, therefore moved to top
 
 import jax.numpy as jnp
 from gemma_forward import forward
@@ -41,7 +42,9 @@ def SGD(params, grads, lr) -> Params:
     return jax.tree_util.tree_map(lambda param, grad: param - lr * grad, params, grads)
 
 
-def train(key, batch_size, params, seq_length, lr, data_sharding) -> tuple[Params, jax.Array]:
+def train(
+    key, batch_size, params, seq_length, lr, data_sharding
+) -> tuple[Params, jax.Array]:
     def loss_batched(xss, params) -> jax.Array:
         return jnp.mean(jax.vmap(loss_fn, in_axes=(0, None))(xss, params))
 
@@ -54,12 +57,14 @@ def train(key, batch_size, params, seq_length, lr, data_sharding) -> tuple[Param
 
 
 def train_loop(data_sharding, params, key) -> tuple[Params, jax.Array]:
-    new_params, loss = train(key, 4*2, params, 1024, 0.01, data_sharding)
+    new_params, loss = train(key, 4 * 2, params, 1024, 0.01, data_sharding)
 
     return new_params, loss
 
+
 from jax.sharding import Mesh, PartitionSpec as P, NamedSharding
 from jax.experimental import mesh_utils
+
 
 # TESTING
 def main():
@@ -73,9 +78,9 @@ def main():
     # Distributed training
     num_devices = jax.device_count()
     print(f"Number of devices {num_devices}")
-    device_mesh = mesh_utils.create_device_mesh((num_devices, ))
-    mesh = Mesh(device_mesh, axis_names=('batch', ))
-    data_sharding = NamedSharding(mesh, P('batch'))
+    device_mesh = mesh_utils.create_device_mesh((num_devices,))
+    mesh = Mesh(device_mesh, axis_names=("batch",))
+    data_sharding = NamedSharding(mesh, P("batch"))
     param_sharding = NamedSharding(mesh, P())
 
     # Create a dummy batch to check sharding
@@ -88,7 +93,7 @@ def main():
     params = jax.device_put(params, param_sharding)
 
     # do stuff
-    keys = jax.random.split(key, 4*100)
+    keys = jax.random.split(key, 4 * 100)
     with mesh:
         params, losses = jax.lax.scan(partial(train_loop, data_sharding), params, keys)
     print("XLA retuned control")
