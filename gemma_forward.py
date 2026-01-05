@@ -160,6 +160,7 @@ def attnHead(Ks, Vs, Qs, pos_a, is_local_attn) -> jax.Array:
 
 
 @jax.jit  # the scan should already compile this, but better to be explicit
+@jax.checkpoint  # OOM problems without this
 def Block(xs: jax.Array, scans) -> jax.Array:
     r"""
     Plan:
@@ -277,6 +278,9 @@ def forward(xs: jax.Array, params: Params) -> jax.Array:
         [t == "local" for t in layer_types]
     )  # shape (26,), [1,1...,1,1]
     xs, _ = jax.lax.scan(Block, xs, (block_params(params), is_local_attn))
+
+    # remove padding again (to save memory)
+    xs = xs[:input_length]
 
     # final norm
     xs = jax.vmap(RMSNorm, in_axes=(0, None))(xs, params["model.norm.weight"])
