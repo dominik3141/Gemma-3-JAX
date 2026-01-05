@@ -17,6 +17,8 @@ But for now we just always take sequences of the same length to avoid this probl
 """
 
 import jax
+jax.distributed.initialize() # must happen before the train_data import, therefore moved to top
+
 import jax.numpy as jnp
 from gemma_forward import forward
 from inspect_weights import load_weights_as_dict
@@ -43,23 +45,45 @@ def train(key, batch_size, params, seq_length, lr) -> tuple[Params, jax.Array]:
         return jnp.mean(jax.vmap(loss_fn, in_axes=(0, None))(xss, params))
 
     train_data = get_training_batch(key, batch_size, seq_length)
+
+    # train_data = jax.lax.with_sharding_constraint(train_data, data_sharding)
+
     loss, grads = jax.value_and_grad(loss_batched, argnums=1)(train_data, params)
     return SGD(params, grads, lr), loss
 
 
 def train_loop(params, key) -> tuple[Params, jax.Array]:
-    new_params, loss = train(key, 2, params, 4, 0.01)
+    new_params, loss = train(key, 2*2, params, 64, 0.01)
 
     return new_params, loss
 
+from jax.sharding import Mesh, PartitionSpec as P, NamedSharding
+from jax.experimental import mesh_utils
 
 # TESTING
 def main():
+    # init distributed training communications (blocking)
+    # jax.distributed.initialize() # must happen before the train_data import, therefore moved to top
+
+    # keys and parameters
     key = jax.random.key(42)
     params = load_weights_as_dict("model_stacked_pt.safetensors")
 
-    keys = jax.random.split(key, 2000)
-    params, losses = jax.lax.scan(train_loop, params, keys)
+    # Distributed training
+    num_devices = jax.device_count()
+    print(f"Number of devices {num_devices}")
+    device_mesh = mesh_utils.create_device_mesh((num_devices, ))
+    mesh = Mesh(device_mesh, axis_names=('batch', ))
+    data_sharding = NamedSharding(mesh, P('batch'))
+    param_sharding = NamedSharding(mesh, P())
+
+    # ensure parameters are replicated across all cores
+    params = jax.device_put(params, param_sharding)
+
+    # do stuff
+    keys = jax.random.split(key, 4*100)
+    with mesh:
+        params, losses = jax.lax.scan(train_loop, params, keys)
     print("XLA retuned control")
     print(losses)
 

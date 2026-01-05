@@ -5,7 +5,7 @@ description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.14"
 dependencies = [
-    "jax>=0.8.2",
+    "jax[tpu]>=0.8.2",
     "ml-dtypes>=0.5.4",
     "numpy>=2.4.0",
     "optax>=0.2.6",
