@@ -4,25 +4,27 @@ from safetensors import safe_open
 from rich.console import Console
 from rich.table import Table
 from rich.panel import Panel
-from rich.text import Text
 from rich import box
+
 
 def format_num(num: int) -> str:
     """Formats a number with commas and M/K suffixes."""
     if num >= 1_000_000:
-        return f"{num/1_000_000:.2f}M"
+        return f"{num / 1_000_000:.2f}M"
     elif num >= 1_000:
-        return f"{num/1_000:.2f}K"
+        return f"{num / 1_000:.2f}K"
     return str(num)
+
 
 def create_bar(fraction: float, width: int = 20) -> str:
     """Creates a simple ASCII/Unicode bar."""
     filled = int(fraction * width)
     return "█" * filled + "░" * (width - filled)
 
+
 def visualize_weights(path: str):
     console = Console()
-    
+
     try:
         f = safe_open(path, framework="np", device="cpu")
     except Exception as e:
@@ -31,18 +33,18 @@ def visualize_weights(path: str):
 
     params_by_layer = {}
     total_params = 0
-    
+
     # First pass: calculate counts
     for key in f.keys():
         shape = f.get_tensor(key).shape
         count = np.prod(shape)
         total_params += count
-        
+
         if key.startswith("model.layers_stacked."):
             # These are stacked across all layers
             num_layers = shape[0]
             count_per_layer = count // num_layers
-            
+
             for i in range(num_layers):
                 layer_key = f"Layer {i:02d}"
                 if layer_key not in params_by_layer:
@@ -59,7 +61,9 @@ def visualize_weights(path: str):
     sorted_layers = sorted(params_by_layer.items())
 
     # Create Summary Table
-    table = Table(title=f"Parameter Distribution: {path}", box=box.ROUNDED, show_footer=True)
+    table = Table(
+        title=f"Parameter Distribution: {path}", box=box.ROUNDED, show_footer=True
+    )
     table.add_column("Component", footer="Total")
     table.add_column("Parameters", justify="right", footer=format_num(total_params))
     table.add_column("Percentage", justify="right")
@@ -71,7 +75,7 @@ def visualize_weights(path: str):
             layer,
             format_num(count),
             f"{percentage:.2f}%",
-            create_bar(count / max(params_by_layer.values()))
+            create_bar(count / max(params_by_layer.values())),
         )
 
     console.print(Panel(table, expand=False))
@@ -87,26 +91,31 @@ def visualize_weights(path: str):
 
     if block_params:
         block_total = sum(block_params.values())
-        detail_table = Table(title="Transformer Block Internal Breakdown (Per Layer)", box=box.SIMPLE)
+        detail_table = Table(
+            title="Transformer Block Internal Breakdown (Per Layer)", box=box.SIMPLE
+        )
         detail_table.add_column("Sub-component")
         detail_table.add_column("Parameters", justify="right")
         detail_table.add_column("Percentage", justify="right")
-        
-        for name, count in sorted(block_params.items(), key=lambda x: x[1], reverse=True):
+
+        for name, count in sorted(
+            block_params.items(), key=lambda x: x[1], reverse=True
+        ):
             detail_table.add_row(
-                name,
-                format_num(count),
-                f"{(count/block_total)*100:.1f}%"
+                name, format_num(count), f"{(count / block_total) * 100:.1f}%"
             )
-        
+
         console.print(Panel(detail_table, title="Layer Internal Details", expand=False))
 
-    console.print(f"\n[bold green]Total Model Parameters:[/bold green] {format_num(total_params)}")
+    console.print(
+        f"\n[bold green]Total Model Parameters:[/bold green] {format_num(total_params)}"
+    )
+
 
 if __name__ == "__main__":
     import sys
+
     weight_path = "model_stacked_it.safetensors"
     if len(sys.argv) > 1:
         weight_path = sys.argv[1]
     visualize_weights(weight_path)
-
