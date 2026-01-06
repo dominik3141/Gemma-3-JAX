@@ -17,6 +17,7 @@ But for now we just always take sequences of the same length to avoid this probl
 """
 
 import jax
+import os
 
 # init distributed training communications (blocking)
 # jax.distributed.initialize()  # must happen before the train_data import, therefore moved to top
@@ -67,7 +68,7 @@ from jax.experimental import mesh_utils
 
 
 # TESTING
-def main():
+def main(num_batches=100):
     # keys and parameters
     key = jax.random.key(42)
     params = load_weights_as_dict("model_stacked_pt.safetensors")
@@ -87,7 +88,7 @@ def main():
     batch_size = num_devices * 2
 
     # do stuff
-    keys = jax.random.split(key, num_devices * 100)
+    keys = jax.random.split(key, num_devices * num_batches)
     with mesh:
         params, losses = jax.lax.scan(
             partial(train_loop, data_sharding, batch_size),
@@ -99,4 +100,5 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    num_batches = int(os.environ.get("NUM_BATCHES", "100"))
+    main(num_batches=num_batches)
