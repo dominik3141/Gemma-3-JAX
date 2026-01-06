@@ -19,7 +19,7 @@ But for now we just always take sequences of the same length to avoid this probl
 import jax
 
 # init distributed training communications (blocking)
-jax.distributed.initialize()  # must happen before the train_data import, therefore moved to top
+# jax.distributed.initialize()  # must happen before the train_data import, therefore moved to top
 
 import jax.numpy as jnp
 from gemma_forward import forward
