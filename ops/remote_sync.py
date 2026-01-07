@@ -7,7 +7,6 @@ Syncs current directory to a remote GCE VM (TPU or GPU) for interactive debuggin
 import argparse
 import subprocess
 import sys
-import os
 
 DEFAULT_VM_NAME = "gemma-dev-1"
 DEFAULT_ZONE = "us-west4-a"
@@ -60,7 +59,7 @@ def sync_code(vm_name, zone, is_tpu):
     )
 
     if is_tpu:
-        # Create dir first
+        # Full Clean: Nuke ~/app and recreate
         run(
             [
                 "gcloud",
@@ -71,7 +70,7 @@ def sync_code(vm_name, zone, is_tpu):
                 vm_name,
                 f"--zone={zone}",
                 "--command",
-                "mkdir -p ~/app",
+                "rm -rf ~/app && mkdir -p ~/app",
             ]
         )
         # TPU VM SCP
@@ -102,7 +101,7 @@ def sync_code(vm_name, zone, is_tpu):
             ]
         )
     else:
-        # Create dir first
+        # Full Clean: Nuke ~/app and recreate
         run(
             [
                 "gcloud",
@@ -111,7 +110,7 @@ def sync_code(vm_name, zone, is_tpu):
                 vm_name,
                 f"--zone={zone}",
                 "--command",
-                "mkdir -p ~/app",
+                "rm -rf ~/app && mkdir -p ~/app",
             ]
         )
         # Standard VM SCP
