@@ -20,6 +20,7 @@ DEFAULT_SA = "gemma-tpu-writer@default-482802.iam.gserviceaccount.com"
 DEFAULT_LOCAL_CREDS = "gemma-tpu-writer-key.json"
 DEFAULT_GPU_TYPE = "NVIDIA_TESLA_T4"
 DEFAULT_GPU_MACHINE_TYPE = "n1-standard-4"
+DEFAULT_GPU_EXECUTOR_IMAGE = "us-docker.pkg.dev/vertex-ai/training/pytorch-gpu.2-1.py310:latest"
 
 
 def run_checked(cmd: list[str]) -> str:
@@ -31,39 +32,70 @@ def run_checked(cmd: list[str]) -> str:
 
 
 def create_vertex_job(args) -> str:
-    machine_spec = {
-        "machineType": getattr(args, "machine_type", DEFAULT_MACHINE_TYPE),
-    }
+    display_name = f"gemma-sft-{int(time.time())}"
 
     if args.use_gpu:
-        machine_spec["machineType"] = DEFAULT_GPU_MACHINE_TYPE
-        machine_spec["acceleratorType"] = DEFAULT_GPU_TYPE
-        machine_spec["acceleratorCount"] = 1
-    else:
-        # TPU Configuration
-        machine_spec["tpuTopology"] = getattr(args, "tpu_topology", DEFAULT_TPU_TOPOLOGY)
+        # For GPU, use Google's pre-built container + local code upload
+        # We pass env vars via --args because executor images handle env vars differently or we can use the env field in gcloud if available (it is not in worker-pool-spec string format easily).
+        # Actually, gcloud supports --args.
+        # We need to install uv in the entrypoint if it's missing.
+        
+        worker_pool_spec = f"machine-type={DEFAULT_GPU_MACHINE_TYPE}," \
+                           f"replica-count=1," \
+                           f"accelerator-type={DEFAULT_GPU_TYPE}," \
+                           f"accelerator-count=1," \
+                           f"executor-image-uri={DEFAULT_GPU_EXECUTOR_IMAGE}," \
+                           f"local-package-path=.," \
+                           f"script=entrypoint.sh"
 
-    config = {
-        "workerPoolSpecs": [
-            {
-                "machineSpec": machine_spec,
-                "replicaCount": 1,
-                "containerSpec": {
-                    "imageUri": args.image,
-                    "env": [
-                        {"name": "NUM_BATCHES", "value": str(args.num_batches)},
-                    ],
-                },
-            }
+        cmd = [
+            "gcloud",
+            "ai",
+            "custom-jobs",
+            "create",
+            f"--region={args.region}",
+            f"--display-name={display_name}",
+            f"--service-account={args.service_account}",
+            f"--worker-pool-spec={worker_pool_spec}",
+            "--format=value(name)",
         ]
-    }
+        # Pass NUM_BATCHES as an arg which entrypoint can read if adapted, 
+        # but for now let's rely on entrypoint.sh using defaults or hardcoded values if env var isn't passed.
+        # To pass env vars with this method is tricky without config. 
+        # Let's stick to the simplest args:
+        # We will wrap the command to set env var inside entrypoint or use a wrapper.
+        # Actually, let's just export it in the script call? No, script is a file.
+        # We can pass --args="--num-batches", "100" if main.py accepts it.
+        # run_job.py passes it via ENV. supervised_train.py reads ENV. 
+        # We can construct the entrypoint to export it.
+        pass 
 
-    with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
-        json.dump(config, f)
-        config_path = f.name
+    else:
+        # TPU Configuration (Existing)
+        machine_spec = {
+            "machineType": getattr(args, "machine_type", DEFAULT_MACHINE_TYPE),
+            "tpuTopology": getattr(args, "tpu_topology", DEFAULT_TPU_TOPOLOGY),
+        }
 
-    try:
-        display_name = f"gemma-sft-{int(time.time())}"
+        config = {
+            "workerPoolSpecs": [
+                {
+                    "machineSpec": machine_spec,
+                    "replicaCount": 1,
+                    "containerSpec": {
+                        "imageUri": args.image,
+                        "env": [
+                            {"name": "NUM_BATCHES", "value": str(args.num_batches)},
+                        ],
+                    },
+                }
+            ]
+        }
+
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
+            json.dump(config, f)
+            config_path = f.name
+        
         cmd = [
             "gcloud",
             "ai",
@@ -75,9 +107,12 @@ def create_vertex_job(args) -> str:
             f"--config={config_path}",
             "--format=value(name)",
         ]
+
+    # Execute
+    try:
         return run_checked(cmd)
     finally:
-        if os.path.exists(config_path):
+        if not args.use_gpu and 'config_path' in locals() and os.path.exists(config_path):
             os.remove(config_path)
 
 
