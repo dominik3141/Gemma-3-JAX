@@ -20,7 +20,6 @@ tokenizer.json
 prompt.ipynb
 shakespeare.txt
 shakespeare_tokenized.npz
-deploy_remote.py
 old_notebooks/
 .venv/
 .DS_Store

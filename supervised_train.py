@@ -67,11 +67,18 @@ from jax.sharding import Mesh, PartitionSpec as P, NamedSharding
 from jax.experimental import mesh_utils
 
 
+import os
+# Set XLA flags before any jax imports if possible, but supervised_train is imported by main.
+# We will set them in setup.py instead for the child process.
+
 # TESTING
 def main(num_batches=100):
+    print("--- supervised_train.main() started ---")
     # keys and parameters
     key = jax.random.key(42)
+    print("Loading weights...")
     params = load_weights_as_dict("model_stacked_pt.safetensors")
+    print("Weights loaded.")
 
     # Distributed training
     num_devices: int = jax.device_count()
