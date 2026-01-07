@@ -145,13 +145,59 @@ blob.download_to_filename('{WEIGHTS_LOCAL_PATH}')
     run(["uv", "run", "python", "-c", download_script])
 
 
+def create_env_file():
+
+
+    key_path = os.path.join(os.getcwd(), "ops", "gemma-tpu-writer-key.json")
+
+
+    if os.path.exists(key_path):
+
+
+        print(f"--- Configuring .env with key: {key_path} ---")
+
+
+        with open(".env", "w") as f:
+
+
+            f.write(f"GOOGLE_APPLICATION_CREDENTIALS={key_path}\n")
+
+
+            # Also set for current process so --run-main works immediately
+
+
+            os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = key_path
+
+
+
+
+
 def main():
+
+
     parser = argparse.ArgumentParser(description="Setup JAX environment")
-    parser.add_argument(
-        "--run-main", action="store_true", help="Launch main.py after setup"
-    )
+
+
+    parser.add_argument("--run-main", action="store_true", help="Launch main.py after setup")
+
+
     # Capture unknown args to pass to main.py if needed
+
+
     args, unknown_args = parser.parse_known_args()
+
+
+
+
+
+    # Set service account credentials if available
+
+
+    create_env_file()
+
+
+
+
 
     setup_git()
     install_uv()

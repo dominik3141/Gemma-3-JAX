@@ -29,6 +29,7 @@ def sync_code(vm_name, zone, is_tpu):
         "*.pt",
         "*.ckpt",
         "source_*.tar.gz",
+        "dev_sync.tar.gz",
     ]
 
     # Simple fallback: Tar locally with excludes, SCP tar, Untar remotely.
