@@ -97,7 +97,10 @@ def main(num_batches=100):
         )
     print("XLA retuned control")
     print(losses)
+    # Save params to GCS (defaults to project bucket if env not set)
+    from save_params import save_params
 
+    save_params(params)
 
 if __name__ == "__main__":
     num_batches = int(os.environ.get("NUM_BATCHES", "100"))
