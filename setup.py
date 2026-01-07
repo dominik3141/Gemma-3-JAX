@@ -15,6 +15,7 @@ import os
 import subprocess
 import sys
 import shutil
+import argparse
 
 # --- Configuration ---
 GIT_USER_NAME = "Dominik Farr"
@@ -47,18 +48,53 @@ def install_uv():
         if os.path.exists(uv_bin) and uv_bin not in os.environ["PATH"]:
             os.environ["PATH"] = uv_bin + os.pathsep + os.environ["PATH"]
 
+def get_metadata(attribute):
+    try:
+        # Use curl to get metadata
+        result = subprocess.run(
+            ["curl", "-s", "-H", "Metadata-Flavor: Google", f"http://metadata.google.internal/computeMetadata/v1/instance/{attribute}"],
+            capture_output=True,
+            text=True,
+            timeout=1
+        )
+        if result.returncode == 0:
+            return result.stdout.strip()
+    except Exception:
+        pass
+    return None
+
 def sync_dependencies():
     print("--- Syncing dependencies with uv ---")
     
     cmd = ["uv", "sync", "--frozen", "--no-dev"]
     
-    # Determine hardware and add extras
-    if shutil.which("nvidia-smi"):
-        print("GPU detected: enabling 'cuda' extra")
-        cmd.extend(["--extra", "cuda"])
-    elif os.environ.get("TPU_NAME") or os.path.exists("/dev/accel0"):
-        print("TPU detected: enabling 'tpu' extra")
+    # Hardware Detection Logic
+    is_gpu = shutil.which("nvidia-smi") is not None
+    is_tpu = False
+    
+    # 1. Check Metadata Server (Definitive for GCP TPUs)
+    accel_type = get_metadata("attributes/accelerator-type")
+    
+    if accel_type and ("tpu" in accel_type.lower() or "litepod" in accel_type.lower()):
+        print(f"TPU detected via metadata: {accel_type}")
+        is_tpu = True
+    elif shutil.which("nvidia-smi"):
+        # 2. Check local GPU
+        print("GPU detected via nvidia-smi")
+        is_gpu = True
+        
+    # Check 3: Env Var (Legacy/Vertex)
+    if not is_tpu and not is_gpu and os.environ.get("TPU_NAME"):
+        is_tpu = True
+        print("TPU detected via TPU_NAME env var")
+    
+    # Apply extras
+    if is_tpu:
+        print("Enabling 'tpu' extra")
         cmd.extend(["--extra", "tpu"])
+    elif is_gpu:
+        print("Enabling 'cuda' extra")
+        cmd.extend(["--extra", "cuda"])
     else:
         print("No accelerator detected: CPU only")
         
@@ -98,26 +134,38 @@ blob.download_to_filename('{WEIGHTS_LOCAL_PATH}')
     run(["uv", "run", "python", "-c", download_script])
 
 def main():
+    parser = argparse.ArgumentParser(description="Setup JAX environment")
+    parser.add_argument("--run-main", action="store_true", help="Launch main.py after setup")
+    # Capture unknown args to pass to main.py if needed
+    args, unknown_args = parser.parse_known_args()
+
     setup_git()
     install_uv()
     sync_dependencies()
     download_weights()
     
-    print("--- Launching main.py ---")
-    # Pass all arguments forwarded to this script
-    env = os.environ.copy()
-    env["XLA_PYTHON_CLIENT_PREALLOCATE"] = "false"
-    
-    # Disable accelerator plugins if not present to save memory and avoid errors
-    if not shutil.which("nvidia-smi") and not (os.environ.get("TPU_NAME") or os.path.exists("/dev/accel0")):
-        print("Forcing JAX to CPU mode")
-        env["JAX_PLATFORMS"] = "cpu"
-    
-    cmd = ["uv", "run", "python", "-m", "main"] + sys.argv[1:]
-    
-    # Use subprocess.run with env
-    print(f"Running: {' '.join(cmd)}")
-    subprocess.run(cmd, check=True, env=env)
+    if args.run_main:
+        print("--- Launching main.py ---")
+        env = os.environ.copy()
+        env["XLA_PYTHON_CLIENT_PREALLOCATE"] = "false"
+        
+        # Disable accelerator plugins if not present to save memory and avoid errors
+        # Re-check hardware using the same logic (or reuse detection if we refactored)
+        # For safety, check simple signals again
+        is_gpu = shutil.which("nvidia-smi") is not None
+        is_tpu = get_metadata("attributes/accelerator-type") or os.environ.get("TPU_NAME") or os.path.exists("/dev/accel0")
+        
+        if not is_gpu and not is_tpu:
+             print("Forcing JAX to CPU mode")
+             env["JAX_PLATFORMS"] = "cpu"
+        
+        cmd = ["uv", "run", "python", "-m", "main"] + unknown_args
+        
+        print(f"Running: {' '.join(cmd)}")
+        subprocess.run(cmd, check=True, env=env)
+    else:
+        print("--- Setup Complete ---")
+        print("To run training: uv run python -m main")
 
 if __name__ == "__main__":
     main()

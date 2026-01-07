@@ -84,7 +84,7 @@ def create_vertex_job(args, tar_filename) -> str:
         f"blob=bucket.blob(\"source/{tar_filename}\"); "
         f"blob.download_to_filename(\"source.tar.gz\")' && "
         f"tar --warning=no-unknown-keyword -xf source.tar.gz && "
-        f"python3 setup.py"
+        f"python3 setup.py --run-main"
     )
 
     machine_spec = {

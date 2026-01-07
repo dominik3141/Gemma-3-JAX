@@ -91,7 +91,8 @@ def sync_code(vm_name, zone, is_tpu):
     subprocess.run(["rm", "dev_sync.tar.gz"])
     print("--- Sync Complete ---")
     print(f"To connect: gcloud compute {'tpus tpu-vm' if is_tpu else ''} ssh {vm_name} --zone={zone}")
-    print("Then run: cd ~/app && python3 setup.py")
+    print("1. Setup:   cd ~/app && python3 setup.py")
+    print("2. Run:     uv run python -m main")
 
 def main():
     parser = argparse.ArgumentParser()
