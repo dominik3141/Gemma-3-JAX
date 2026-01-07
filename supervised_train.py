@@ -78,7 +78,7 @@ def main(num_batches=100):
     print(f"Number of devices: {num_devices}")
     print(f"Devices: {jax.devices()}")
     print(f"Local devices: {jax.local_devices()}")
-    print(f"Backend: {jax.lib.xla_bridge.get_backend().platform}")
+    print(f"Backend: {jax.default_backend()}")
 
     device_mesh = mesh_utils.create_device_mesh((num_devices,))
     mesh = Mesh(device_mesh, axis_names=("batch",))
