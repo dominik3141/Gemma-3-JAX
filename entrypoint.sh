@@ -21,4 +21,15 @@ else
     uv sync --no-dev
 fi
 
+# Detect hardware and install appropriate JAX
+if command -v nvidia-smi &> /dev/null; then
+    echo "GPU detected, installing jax[cuda12_pip]"
+    uv pip install "jax[cuda12_pip]" -C "jaxlib:--allow_prestable"
+elif [[ -n "${TPU_NAME:-}" ]] || [[ -c /dev/accel0 ]]; then
+    echo "TPU detected, ensuring jax[tpu] is installed"
+    uv pip install "jax[tpu]" -f https://storage.googleapis.com/jax-releases/libtpu_releases.html
+else
+    echo "No accelerator detected, using default JAX"
+fi
+
 exec python -m supervised_train
