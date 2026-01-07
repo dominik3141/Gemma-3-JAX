@@ -67,10 +67,6 @@ from jax.sharding import Mesh, PartitionSpec as P, NamedSharding
 from jax.experimental import mesh_utils
 
 
-import os
-# Set XLA flags before any jax imports if possible, but supervised_train is imported by main.
-# We will set them in setup.py instead for the child process.
-
 # TESTING
 def main(num_batches=100):
     print("--- supervised_train.main() started ---")
@@ -100,12 +96,14 @@ def main(num_batches=100):
 
     # do stuff
     keys = jax.random.split(key, num_devices * num_batches)
+    
     with mesh:
         params, losses = jax.lax.scan(
             partial(train_loop, data_sharding, batch_size),
             params,
             keys,
         )
+            
     print("XLA retuned control")
     print(losses)
     # Save params to GCS (defaults to project bucket if env not set)

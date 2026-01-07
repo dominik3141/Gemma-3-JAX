@@ -67,7 +67,7 @@ def sync_code(vm_name, zone, is_tpu):
         run([
             "gcloud", "compute", "tpus", "tpu-vm", "ssh", 
             vm_name, f"--zone={zone}", 
-            "--command", "tar -xzf ~/dev_sync.tar.gz -C ~/app && rm ~/dev_sync.tar.gz"
+            "--command", "tar --warning=no-unknown-keyword -xzf ~/dev_sync.tar.gz -C ~/app && rm ~/dev_sync.tar.gz"
         ])
     else:
         # Create dir first
@@ -85,7 +85,7 @@ def sync_code(vm_name, zone, is_tpu):
         run([
             "gcloud", "compute", "ssh", 
             vm_name, f"--zone={zone}", 
-            "--command", "tar -xzf ~/dev_sync.tar.gz -C ~/app && rm ~/dev_sync.tar.gz"
+            "--command", "tar --warning=no-unknown-keyword -xzf ~/dev_sync.tar.gz -C ~/app && rm ~/dev_sync.tar.gz"
         ])
     
     subprocess.run(["rm", "dev_sync.tar.gz"])
