@@ -3,15 +3,23 @@ import argparse
 import subprocess
 import sys
 import time
+import json
+import tempfile
+import os
 
 DEFAULT_REGION = "us-west4"
 DEFAULT_NUM_BATCHES = 100
-DEFAULT_TIMEOUT_HOURS = 1  # server-side timeout
-DEFAULT_ACCEL_TYPE = "tpu-v5e-podslice"
-DEFAULT_ACCEL_COUNT = 4
+DEFAULT_TIMEOUT_HOURS = 1
+# Default to TPU v5e single chip.
+DEFAULT_TPU_TYPE = "TPU_V5_LITEPOD"
+DEFAULT_ACCELERATOR_COUNT = 1
+DEFAULT_TPU_TOPOLOGY = "1x1"
+DEFAULT_MACHINE_TYPE = "ct5lp-hightpu-1t"  # host VM type for TPU v5e single chip
 DEFAULT_IMAGE = "us-west4-docker.pkg.dev/default-482802/gemma-tpu/jax-gemma-tpu:latest"
 DEFAULT_SA = "gemma-tpu-writer@default-482802.iam.gserviceaccount.com"
 DEFAULT_LOCAL_CREDS = "gemma-tpu-writer-key.json"
+DEFAULT_GPU_TYPE = "NVIDIA_TESLA_T4"
+DEFAULT_GPU_MACHINE_TYPE = "n1-standard-4"
 
 
 def run_checked(cmd: list[str]) -> str:
@@ -23,29 +31,55 @@ def run_checked(cmd: list[str]) -> str:
 
 
 def create_vertex_job(args) -> str:
-    timeout_seconds = args.timeout_hours * 3600
-    spec = (
-        f"machine-type=cloud-tpu,"
-        f"accelerator-type={args.accelerator_type},"
-        f"accelerator-count={args.accelerator_count},"
-        f"replica-count=1,"
-        f"container-image-uri={args.image},"
-        f"env=NUM_BATCHES={args.num_batches}"
-    )
-    display_name = f"gemma-sft-{int(time.time())}"
-    cmd = [
-        "gcloud",
-        "ai",
-        "custom-jobs",
-        "create",
-        f"--region={args.region}",
-        f"--display-name={display_name}",
-        f"--service-account={args.service_account}",
-        f"--worker-pool-spec={spec}",
-        f"--scheduling-timeout={timeout_seconds}s",
-        "--format=value(name)",
-    ]
-    return run_checked(cmd)
+    machine_spec = {
+        "machineType": getattr(args, "machine_type", DEFAULT_MACHINE_TYPE),
+    }
+
+    if args.use_gpu:
+        machine_spec["machineType"] = DEFAULT_GPU_MACHINE_TYPE
+        machine_spec["acceleratorType"] = DEFAULT_GPU_TYPE
+        machine_spec["acceleratorCount"] = 1
+    else:
+        # TPU Configuration
+        machine_spec["tpuTopology"] = getattr(args, "tpu_topology", DEFAULT_TPU_TOPOLOGY)
+
+    config = {
+        "workerPoolSpecs": [
+            {
+                "machineSpec": machine_spec,
+                "replicaCount": 1,
+                "containerSpec": {
+                    "imageUri": args.image,
+                    "env": [
+                        {"name": "NUM_BATCHES", "value": str(args.num_batches)},
+                    ],
+                },
+            }
+        ]
+    }
+
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
+        json.dump(config, f)
+        config_path = f.name
+
+    try:
+        display_name = f"gemma-sft-{int(time.time())}"
+        cmd = [
+            "gcloud",
+            "ai",
+            "custom-jobs",
+            "create",
+            f"--region={args.region}",
+            f"--display-name={display_name}",
+            f"--service-account={args.service_account}",
+            f"--config={config_path}",
+            "--format=value(name)",
+        ]
+        return run_checked(cmd)
+    finally:
+        if os.path.exists(config_path):
+            os.remove(config_path)
+
 
 
 def stream_logs(args, job_name: str) -> None:
@@ -104,10 +138,13 @@ def run_local(args) -> None:
 def main() -> None:
     parser = argparse.ArgumentParser(description="Run Gemma TPU training locally or on Vertex.")
     parser.add_argument("--num-batches", type=int, default=DEFAULT_NUM_BATCHES)
-    parser.add_argument("--timeout-hours", type=int, default=DEFAULT_TIMEOUT_HOURS, help="Server-side timeout (hours) for Vertex jobs.")
+    parser.add_argument("--timeout-hours", type=int, default=DEFAULT_TIMEOUT_HOURS, help="Timeout hint (not enforced client-side).")
     parser.add_argument("--region", default=DEFAULT_REGION)
-    parser.add_argument("--accelerator-type", default=DEFAULT_ACCEL_TYPE)
-    parser.add_argument("--accelerator-count", type=int, default=DEFAULT_ACCEL_COUNT)
+    parser.add_argument("--machine-type", default=DEFAULT_MACHINE_TYPE)
+    parser.add_argument("--tpu-type", default=DEFAULT_TPU_TYPE)
+    parser.add_argument("--accelerator-count", type=int, default=DEFAULT_ACCELERATOR_COUNT)
+    parser.add_argument("--tpu-topology", default=DEFAULT_TPU_TOPOLOGY)
+    parser.add_argument("--use-gpu", action="store_true", help="Use NVIDIA T4 GPU instead of TPU.")
     parser.add_argument("--image", default=DEFAULT_IMAGE)
     parser.add_argument("--service-account", default=DEFAULT_SA)
     parser.add_argument("--local", action="store_true", help="Run locally via docker instead of Vertex.")
