@@ -80,12 +80,6 @@ def repack_layers_to_stacked_safetensors(
 
     L = sorted_layers[-1] + 1 if strict else len(sorted_layers)
 
-    # Helper: map file layer ids to position in stacked axis (0..L-1)
-    if strict:
-        layer_pos = {i: i for i in sorted_layers}
-    else:
-        layer_pos = {i: p for p, i in enumerate(sorted_layers)}
-
     out_tensors: Dict[str, np.ndarray] = dict(nonlayer)
 
     # Build stacked tensors per suffix

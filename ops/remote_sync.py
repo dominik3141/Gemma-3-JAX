@@ -6,7 +6,6 @@ Syncs current directory to a remote GCE VM (TPU or GPU) for interactive debuggin
 
 import argparse
 import subprocess
-import sys
 import os
 
 DEFAULT_VM_NAME = "gemma-dev-1"

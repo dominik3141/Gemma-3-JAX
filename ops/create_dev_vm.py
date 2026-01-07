@@ -20,7 +20,7 @@ SERVICE_ACCOUNT = "gemma-tpu-writer@default-482802.iam.gserviceaccount.com"
 
 
 def run_checked(cmd):
-    print(f"Running: ", " ".join(cmd))
+    print("Running: ", " ".join(cmd))
     res = subprocess.run(cmd, check=False, capture_output=True, text=True)
     if res.returncode != 0:
         sys.stderr.write(f"Command failed ({res.returncode}):\n{res.stderr}\n")
@@ -71,7 +71,7 @@ def main():
         f"1. Sync code:  python3 ops/remote_sync.py --vm {args.name} --zone {args.zone}"
     )
     print(f"2. Connect:    gcloud compute ssh {args.name} --zone {args.zone}")
-    print(f"3. Init env:   cd ~/app && python3 setup.py")
+    print("3. Init env:   cd ~/app && python3 setup.py")
 
 
 if __name__ == "__main__":
