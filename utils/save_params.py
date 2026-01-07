@@ -11,7 +11,7 @@ import numpy as np
 from google.cloud import storage
 from safetensors.numpy import save_file
 
-from gemma_forward import Params
+from core.gemma_forward import Params
 
 # Default bucket/object to write when none is provided
 DEFAULT_GCS_OUTPUT_PATH = (

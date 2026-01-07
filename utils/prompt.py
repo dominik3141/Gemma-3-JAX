@@ -3,11 +3,10 @@ import argparse
 import jax
 import jax.numpy as jnp
 import sentencepiece as spm
+from core.gemma_forward import forward
+from utils.inspect_weights import load_weights_as_dict
 
-from gemma_forward import forward
-from inspect_weights import load_weights_as_dict
-
-
+# Load tokenizer
 VOCAB_SIZE = 262_144
 BOS_ID = 2
 EOS_ID = 1

@@ -7,6 +7,7 @@ Syncs current directory to a remote GCE VM (TPU or GPU) for interactive debuggin
 import argparse
 import subprocess
 import sys
+import os
 
 DEFAULT_VM_NAME = "gemma-dev-1"
 DEFAULT_ZONE = "us-west4-a"
@@ -30,24 +31,8 @@ def sync_code(vm_name, zone, is_tpu):
         "source_*.tar.gz",
     ]
 
-    # Construct rsync-like exclude flags for scp?
-    # gcloud scp doesn't support --exclude easily.
-    # Better to use rsync if available, or just copy everything (careful with weights).
-    # actually gcloud compute scp --recurse copies everything.
-
-    # Strategy: Use rsync over ssh provided by gcloud config.
-    # But that's complex to setup auto-auth.
-
     # Simple fallback: Tar locally with excludes, SCP tar, Untar remotely.
     # We set COPYFILE_DISABLE=1 to prevent macOS from including ._ metadata files (AppleDouble)
-    env = (
-        sys.modules[__name__].__dict__.get("os", {}).environ.copy()
-        if "os" in sys.modules
-        else {}
-    )
-    # Actually need to import os
-    import os
-
     env = os.environ.copy()
     env["COPYFILE_DISABLE"] = "1"
 
