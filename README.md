@@ -1,8 +1,12 @@
 # Gemma 3 single file implementation in JAX
 
 An extremely simple implementation of the 1b version of Gemma 3.
-The only important file here is `gemma_forward.py` which implements all interesting logic.
-There is also a vibecoded `prompt.py` cli tool to sample using the forward function defined in `gemma_forward.py` (assuming the instruction tuned weights are in a specific format defined in `restack_weights.py`).
+All important files are in `core`, all other code is boring and maintained by AI.
+
+## Core files
+
+1. `gemma_forward.py`. Defines a very simple forward function, so far very optimized for prefill and not at all great for autoregressive sampling (no KV cache, no flash attention).
+2. `supervised_train.py` Simple next token prediction training using the forward pass.
 
 ## Status
 
@@ -12,5 +16,4 @@ This is very much a work in progress, but the current code already samples not o
 
 1. KV caching
 2. Flash attention
-3. Masking of padding tokens
-4. All other inference optimizations I can come up with
+3. All other inference optimizations I can come up with
