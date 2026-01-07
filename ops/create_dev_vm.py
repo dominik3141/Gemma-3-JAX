@@ -60,7 +60,7 @@ def main():
     create_vm(args.name, args.zone)
     
     print("\n--- Setup Complete ---")
-    print(f"1. Sync code:  python3 remote_sync.py --vm {args.name} --zone {args.zone}")
+    print(f"1. Sync code:  python3 ops/remote_sync.py --vm {args.name} --zone {args.zone}")
     print(f"2. Connect:    gcloud compute ssh {args.name} --zone {args.zone}")
     print(f"3. Init env:   cd ~/app && python3 setup.py")
 

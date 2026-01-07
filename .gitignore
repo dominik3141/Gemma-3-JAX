@@ -1,26 +1,26 @@
-# Python-generated files
-__pycache__/
-*.py[oc]
-build/
-dist/
-wheels/
-*.egg-info
-.DS_Store
-
-# Virtual environments
-.venv
-
-model_pt.safetensors
-model_stacked_pt.safetensors
-model_it.safetensors
-model_stacked_it.safetensors
-tokenizer.json
-tokenizer.model
-tokenizer.json
-prompt.ipynb
-shakespeare.txt
-shakespeare_tokenized.npz
-old_notebooks/
+# Environments
 .venv/
+__pycache__/
+*.pyc
+
+# Data & Weights
+data/
+*.safetensors
+*.pt
+*.ckpt
+*.model
+*.json
+*.npz
+*.txt
+
+# Secrets & Keys
+*.json
+!pyproject.toml
+!uv.lock
+
+# OS metadata
 .DS_Store
-gemma-tpu-writer-key.json
+
+# Temporary artifacts
+source_*.tar.gz
+dev_sync.tar.gz

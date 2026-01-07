@@ -23,11 +23,11 @@ import os
 # jax.distributed.initialize()  # must happen before the train_data import, therefore moved to top
 
 import jax.numpy as jnp
-from gemma_forward import forward
-from inspect_weights import load_weights_as_dict
+from core.gemma_forward import forward
+from utils.inspect_weights import load_weights_as_dict
 import optax
-from gemma_forward import Params
-from sft_data import get_training_batch
+from core.gemma_forward import Params
+from utils.sft_data import get_training_batch
 from functools import partial
 
 
@@ -73,7 +73,7 @@ def main(num_batches=100):
     # keys and parameters
     key = jax.random.key(42)
     print("Loading weights...")
-    params = load_weights_as_dict("model_stacked_pt.safetensors")
+    params = load_weights_as_dict("data/model_stacked_pt.safetensors")
     print("Weights loaded.")
 
     # Distributed training
@@ -107,7 +107,7 @@ def main(num_batches=100):
     print("XLA retuned control")
     print(losses)
     # Save params to GCS (defaults to project bucket if env not set)
-    from save_params import save_params
+    from utils.save_params import save_params
 
     save_params(params)
 

@@ -22,7 +22,7 @@ GIT_USER_NAME = "Dominik Farr"
 GIT_USER_EMAIL = "dominik.farr@icloud.com"
 WEIGHTS_BUCKET = "gemma-tpu-weights-us-west4-482802"
 WEIGHTS_FILE = "model_stacked_pt.safetensors"
-WEIGHTS_LOCAL_PATH = "model_stacked_pt.safetensors"
+WEIGHTS_LOCAL_PATH = "data/model_stacked_pt.safetensors"
 
 def run(cmd, check=True, shell=False):
     print(f"Running: {' '.join(cmd) if isinstance(cmd, list) else cmd}")

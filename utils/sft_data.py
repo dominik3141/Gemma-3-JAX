@@ -6,9 +6,9 @@ from pathlib import Path
 import numpy as np
 
 # Module-level constants for pre-loaded data to ensure get_training_batch remains efficient
-_TOKENIZER_PATH = "tokenizer.model"
-_DATA_PATH = "shakespeare.txt"
-_TOKENIZED_PATH = "shakespeare_tokenized.npz"
+_TOKENIZER_PATH = "data/tokenizer.model"
+_DATA_PATH = "data/shakespeare.txt"
+_TOKENIZED_PATH = "data/shakespeare_tokenized.npz"
 
 
 def _load_data() -> jax.Array:
