@@ -72,8 +72,9 @@ def create_vertex_job(args, tar_filename) -> str:
     # 4. Run setup.py (which installs uv, syncs deps, downloads weights, runs main.py)
     
     # We use a simple python script embedded in the command to download the source
+    # We also pre-install uv via pip to avoid relying on curl/sh in the container
     download_source_cmd = (
-        f"pip install google-cloud-storage && "
+        f"pip install google-cloud-storage uv && "
         f"python3 -c 'from google.cloud import storage; "
         f"client=storage.Client(); "
         f"bucket=client.bucket(\"{BUCKET_NAME}\"); "
