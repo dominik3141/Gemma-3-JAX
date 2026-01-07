@@ -14,7 +14,9 @@ from safetensors.numpy import save_file
 from gemma_forward import Params
 
 # Default bucket/object to write when none is provided
-DEFAULT_GCS_OUTPUT_PATH = "gs://gemma-tpu-weights-us-west4-482802/model_stacked_pt.safetensors"
+DEFAULT_GCS_OUTPUT_PATH = (
+    "gs://gemma-tpu-weights-us-west4-482802/model_stacked_pt.safetensors"
+)
 
 
 def save_params(params: Params) -> None:
@@ -34,7 +36,9 @@ def save_params(params: Params) -> None:
     without_scheme = gcs_path[len("gs://") :]
     parts = without_scheme.split("/", 1)
     bucket_name = parts[0]
-    blob_name = parts[1] if len(parts) > 1 and parts[1] else "model_stacked_pt.safetensors"
+    blob_name = (
+        parts[1] if len(parts) > 1 and parts[1] else "model_stacked_pt.safetensors"
+    )
     if not bucket_name:
         raise ValueError("GCS_OUTPUT_PATH is missing a bucket name")
 
