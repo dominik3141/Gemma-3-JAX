@@ -49,8 +49,20 @@ def install_uv():
 
 def sync_dependencies():
     print("--- Syncing dependencies with uv ---")
-    # In the future, we can add --extra gpu or --extra tpu here if we use optional-dependencies
-    run(["uv", "sync", "--frozen", "--no-dev"])
+    
+    cmd = ["uv", "sync", "--frozen", "--no-dev"]
+    
+    # Determine hardware and add extras
+    if shutil.which("nvidia-smi"):
+        print("GPU detected: enabling 'cuda' extra")
+        cmd.extend(["--extra", "cuda"])
+    elif os.environ.get("TPU_NAME") or os.path.exists("/dev/accel0"):
+        print("TPU detected: enabling 'tpu' extra")
+        cmd.extend(["--extra", "tpu"])
+    else:
+        print("No accelerator detected: CPU only")
+        
+    run(cmd)
 
 def download_weights():
     if os.path.exists(WEIGHTS_LOCAL_PATH):

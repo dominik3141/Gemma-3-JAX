@@ -6,8 +6,6 @@ readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
     "jax>=0.8.2",
-    # "jax[tpu]>=0.8.2; sys_platform == 'linux'",
-    # "jax[cuda12]>=0.8.2; sys_platform == 'linux'",
     "google-cloud-storage>=2.18.0",
     "ml-dtypes>=0.5.4",
     "numpy>=2.4.0",
@@ -16,6 +14,10 @@ dependencies = [
     "safetensors>=0.7.0",
     "sentencepiece>=0.2.1",
 ]
+
+[project.optional-dependencies]
+cuda = ["jax[cuda12]>=0.8.2"]
+tpu = ["jax[tpu]>=0.8.2"]
 
 [tool.ruff.lint]
 ignore = ["E402"]
