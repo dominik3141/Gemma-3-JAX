@@ -19,7 +19,7 @@ import argparse
 # --- Configuration ---
 GIT_USER_NAME = "Dominik Farr"
 GIT_USER_EMAIL = "dominik.farr@icloud.com"
-WEIGHTS_BUCKET = "gemma-tpu-weights-us-west4-482802"
+WEIGHTS_BUCKET = "gemma_tmp_12342378236hf"
 WEIGHTS_FILE = "model_stacked_pt.safetensors"
 WEIGHTS_LOCAL_PATH = "data/model_stacked_pt.safetensors"
 
@@ -78,12 +78,11 @@ def sync_dependencies():
 
     cmd = ["uv", "sync", "--frozen", "--no-dev"]
 
-    # Hardware Detection Logic
-    is_gpu = shutil.which("nvidia-smi") is not None
-    is_tpu = False
-
     # 1. Check Metadata Server (Definitive for GCP TPUs)
     accel_type = get_metadata("attributes/accelerator-type")
+
+    is_tpu = False
+    is_gpu = False
 
     if accel_type and ("tpu" in accel_type.lower() or "litepod" in accel_type.lower()):
         print(f"TPU detected via metadata: {accel_type}")
@@ -116,30 +115,22 @@ def download_weights():
         print(f"--- Weights already exist at {WEIGHTS_LOCAL_PATH} ---")
         return
 
-    print(f"--- Downloading weights from gs://{WEIGHTS_BUCKET} ---")
+    print(f"--- Downloading base weights from gs://{WEIGHTS_BUCKET} ---")
 
-    # Python logic to find and download
+    # Python logic to download base weights strictly
     download_script = f"""
-import os
 from google.cloud import storage
 
 client = storage.Client()
 bucket = client.bucket('{WEIGHTS_BUCKET}')
-
-# Try exact match first
 blob = bucket.blob('{WEIGHTS_FILE}')
-if not blob.exists():
-    print(f"'{WEIGHTS_FILE}' not found, searching for latest match...")
-    blobs = list(client.list_blobs('{WEIGHTS_BUCKET}', prefix='model_stacked_pt'))
-    # Sort by time updated
-    blobs.sort(key=lambda x: x.updated, reverse=True)
-    if not blobs:
-        print("No weights found in bucket!")
-        exit(1)
-    blob = blobs[0]
-    print(f"Found latest: {{blob.name}}")
 
-print(f"Downloading {{blob.name}} to {WEIGHTS_LOCAL_PATH}...")
+if not blob.exists():
+    print(f"ERROR: Base weights '{{blob.name}}' not found in bucket '{{bucket.name}}'!")
+    import sys
+    sys.exit(1)
+
+print(f"Downloading base weights {{blob.name}} to {WEIGHTS_LOCAL_PATH}...")
 blob.download_to_filename('{WEIGHTS_LOCAL_PATH}')
 """
     run(["uv", "run", "python", "-c", download_script])
@@ -147,31 +138,23 @@ blob.download_to_filename('{WEIGHTS_LOCAL_PATH}')
 
 def create_env_file():
     key_path = os.path.join(os.getcwd(), "ops", "gemma-tpu-writer-key.json")
-
     if os.path.exists(key_path):
         print(f"--- Configuring .env with key: {key_path} ---")
-
         with open(".env", "w") as f:
             f.write(f"GOOGLE_APPLICATION_CREDENTIALS={key_path}\n")
-
             # Also set for current process so --run-main works immediately
-
             os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = key_path
 
 
 def main():
     parser = argparse.ArgumentParser(description="Setup JAX environment")
-
     parser.add_argument(
         "--run-main", action="store_true", help="Launch main.py after setup"
     )
-
     # Capture unknown args to pass to main.py if needed
-
     args, unknown_args = parser.parse_known_args()
 
     # Set service account credentials if available
-
     create_env_file()
 
     setup_git()
@@ -185,8 +168,6 @@ def main():
         env["XLA_PYTHON_CLIENT_PREALLOCATE"] = "false"
 
         # Disable accelerator plugins if not present to save memory and avoid errors
-        # Re-check hardware using the same logic (or reuse detection if we refactored)
-        # For safety, check simple signals again
         is_gpu = shutil.which("nvidia-smi") is not None
         is_tpu = (
             get_metadata("attributes/accelerator-type")
