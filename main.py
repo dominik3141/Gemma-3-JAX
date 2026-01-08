@@ -2,13 +2,14 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-from core.supervised_train import main
 import jax
 
 
 def init_dist():
-    # init distributed training communications (blocking)
-    jax.distributed.initialize()
+    try:
+        jax.distributed.initialize()
+    except (ValueError, RuntimeError):
+        print("Single host mode")
 
     # Distributed training
     num_devices: int = jax.device_count()
@@ -19,6 +20,9 @@ def init_dist():
 
 
 if __name__ == "__main__":
+    # must be called before any importing anything that might use JA
     init_dist()
+
+    from core.supervised_train import main
 
     main()
