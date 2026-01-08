@@ -17,11 +17,6 @@ But for now we just always take sequences of the same length to avoid this probl
 """
 
 import jax
-import os
-
-# init distributed training communications (blocking)
-# jax.distributed.initialize()  # must happen before the train_data import, therefore moved to top
-
 import jax.numpy as jnp
 from core.gemma_forward import forward
 from utils.inspect_weights import load_weights_as_dict
@@ -29,6 +24,8 @@ import optax
 from core.gemma_forward import Params
 from utils.sft_data import get_training_batch
 from functools import partial
+from jax.sharding import Mesh, PartitionSpec as P, NamedSharding
+from jax.experimental import mesh_utils
 
 
 def loss_fn(xs, params) -> jax.Array:
@@ -63,10 +60,6 @@ def train_loop(data_sharding, batch_size, params, key) -> tuple[Params, jax.Arra
     return new_params, loss
 
 
-from jax.sharding import Mesh, PartitionSpec as P, NamedSharding
-from jax.experimental import mesh_utils
-
-
 # TESTING
 def main(num_batches=100):
     print("--- supervised_train.main() started ---")
@@ -78,17 +71,10 @@ def main(num_batches=100):
 
     # Distributed training
     num_devices: int = jax.device_count()
-    print(f"Number of devices: {num_devices}")
-    print(f"Devices: {jax.devices()}")
-    print(f"Local devices: {jax.local_devices()}")
-    print(f"Backend: {jax.default_backend()}")
-
     device_mesh = mesh_utils.create_device_mesh((num_devices,))
     mesh = Mesh(device_mesh, axis_names=("batch",))
     data_sharding = NamedSharding(mesh, P("batch"))
     param_sharding = NamedSharding(mesh, P())
-
-    # ensure parameters are replicated across all cores
     params = jax.device_put(params, param_sharding)
 
     # Config
@@ -110,8 +96,3 @@ def main(num_batches=100):
     from utils.save_params import save_params
 
     save_params(params)
-
-
-if __name__ == "__main__":
-    num_batches = int(os.environ.get("NUM_BATCHES", "100"))
-    main(num_batches=num_batches)
