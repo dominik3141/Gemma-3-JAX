@@ -14,11 +14,12 @@ dependencies = [
     "safetensors>=0.7.0",
     "sentencepiece>=0.2.1",
     "python-dotenv>=1.0.0",
+    "google-cloud-logging>=3.13.0",
 ]
 
 [project.optional-dependencies]
 cuda = ["jax[cuda12]>=0.8.2"]
-tpu = ["jax[tpu]>=0.8.2"]
+tpu = ["jax[tpu]>=0.8.2", "tpu-info"]
 
 [tool.ruff.lint]
 ignore = ["E402"]
@@ -29,6 +30,4 @@ url = "https://storage.googleapis.com/jax-releases/libtpu_releases.html"
 explicit = false
 
 [dependency-groups]
-dev = [
-    "pre-commit>=4.5.1",
-]
+dev = ["pre-commit>=4.5.1"]
