@@ -54,6 +54,7 @@ def sync_code(vm_name, zone, is_tpu):
                 "ssh",
                 vm_name,
                 f"--zone={zone}",
+                "--worker=all",
                 "--command",
                 "rm -rf ~/app && mkdir -p ~/app",
             ]
@@ -67,6 +68,7 @@ def sync_code(vm_name, zone, is_tpu):
                 "tpu-vm",
                 "scp",
                 "dev_sync.tar.gz",
+                "--worker=all",
                 f"{vm_name}:~/dev_sync.tar.gz",
                 f"--zone={zone}",
             ]
@@ -81,6 +83,7 @@ def sync_code(vm_name, zone, is_tpu):
                 "ssh",
                 vm_name,
                 f"--zone={zone}",
+                "--worker=all",
                 "--command",
                 "tar --warning=no-unknown-keyword -xzf ~/dev_sync.tar.gz -C ~/app && rm ~/dev_sync.tar.gz",
             ]

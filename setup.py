@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Zero-dependency setup script for JAX Gemma 1B.
-Runs on both Dev (Compute Engine) and Prod (Vertex AI) environments.
+Runs on Compute Engine environments.
 
 Responsibilities:
 1. Configure Git (for dev/debug).
@@ -92,7 +92,7 @@ def sync_dependencies():
         print("GPU detected via nvidia-smi")
         is_gpu = True
 
-    # Check 3: Env Var (Legacy/Vertex)
+    # Check 3: Env Var
     if not is_tpu and not is_gpu and os.environ.get("TPU_NAME"):
         is_tpu = True
         print("TPU detected via TPU_NAME env var")
