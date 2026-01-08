@@ -3,6 +3,9 @@ from dotenv import load_dotenv
 load_dotenv()
 
 import jax
+import os
+
+os.environ["XLA_FLAGS"] = "--xla_force_host_platform_device_count=8"
 
 
 def init_dist():
@@ -30,3 +33,8 @@ if __name__ == "__main__":
     from core.supervised_train import main
 
     main()
+
+    # lowered = jax.jit(main).lower()
+    # hlo_text = lowered.compile().as_text()
+
+    # print(hlo_text)

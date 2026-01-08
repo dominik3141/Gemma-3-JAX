@@ -40,22 +40,18 @@ def _load_data() -> jax.Array:
 _TOKENS = _load_data()
 
 
-def get_training_batch(key: jax.Array, batch_size: int, length: int) -> jax.Array:
+def get_training_sample(length: int, key: jax.Array) -> jax.Array:
     """
-    Returns a batch of tokenized training data from shakespeare.txt.
-
-    The function samples random contiguous slices and prepends a BOS token (ID 2).
-    The returned array has shape (batch_size, length).
+    Returns a single sequence of tokenized training data from skaespeare.txt
     """
     num_tokens = _TOKENS.shape[0]
+
     # We sample length - 1 tokens to make room for the BOS token
     slice_len = length - 1
+    BOS_token = jnp.array([2], dtype=_TOKENS.dtype)
 
-    # Generate random start indices for each batch element
-    start_indices = jax.random.randint(key, (batch_size,), 0, num_tokens - slice_len)
+    start_idx = jax.random.randint(key, (), 0, num_tokens - slice_len)
 
-    def get_slice(start_idx: jax.Array) -> jax.Array:
-        content = jax.lax.dynamic_slice_in_dim(_TOKENS, start_idx, slice_len)
-        return jnp.concatenate([jnp.array([2], dtype=jnp.int32), content])
+    content = jax.lax.dynamic_slice_in_dim(_TOKENS, start_idx, slice_len)
 
-    return jax.vmap(get_slice)(start_indices)
+    return jnp.concatenate([BOS_token, content])

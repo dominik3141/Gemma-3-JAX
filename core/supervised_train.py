@@ -22,7 +22,7 @@ from core.gemma_forward import forward
 from utils.inspect_weights import load_weights_as_dict
 import optax
 from core.gemma_forward import Params
-from utils.sft_data import get_training_batch
+from utils.sft_data import get_training_sample
 from functools import partial
 from jax.sharding import Mesh, PartitionSpec as P, NamedSharding
 from jax.experimental import mesh_utils
@@ -47,7 +47,9 @@ def train(
     def loss_batched(xss, params) -> jax.Array:
         return jnp.mean(jax.vmap(loss_fn, in_axes=(0, None))(xss, params))
 
-    train_data = get_training_batch(key, batch_size, seq_length)
+    keys = jax.random.split(key, batch_size)
+    train_data = jax.vmap(partial(get_training_sample, seq_length))(keys)
+
     train_data = jax.lax.with_sharding_constraint(train_data, data_sharding)
 
     loss, grads = jax.value_and_grad(loss_batched, argnums=1)(train_data, params)
@@ -92,7 +94,10 @@ def main(num_batches=100):
 
     print("XLA retuned control")
     print(losses)
-    # Save params to GCS (defaults to project bucket if env not set)
-    from utils.save_params import save_params
 
-    save_params(params)
+    # Save params to GCS (defaults to project bucket if env not set)
+    # from utils.save_params import save_params
+
+    # save_params(params)
+
+    return params

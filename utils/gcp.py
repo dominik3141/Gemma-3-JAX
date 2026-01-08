@@ -28,7 +28,9 @@ def init_gcp_logging():
     from pathlib import Path
 
     # Load credentials from the ops directory
-    credentials_path = Path(__file__).parent.parent / "ops" / "gemma-tpu-writer-key.json"
+    credentials_path = (
+        Path(__file__).parent.parent / "ops" / "gemma-tpu-writer-key.json"
+    )
     credentials = service_account.Credentials.from_service_account_file(
         str(credentials_path)
     )
