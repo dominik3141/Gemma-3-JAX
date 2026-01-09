@@ -102,7 +102,7 @@ def postAttn(x: jax.Array, x_og: jax.Array, block_params: Params) -> jax.Array:
 
 
 def AttnScores(
-    Q_a: jax.Array, Ks: jax.Array, idx_a: jax.Array, seq_indices
+    Q_a: jax.Array, Ks: jax.Array, idx_a: jax.Array, seq_indices, local_attn=False
 ) -> jax.Array:
     """
     Calculates masked attention scores.
@@ -113,6 +113,14 @@ def AttnScores(
 
     # causal masking
     scores = jnp.where(seq_indices <= idx_a, scores, -jnp.inf)
+
+    if local_attn:
+        # we need a mask m of the form
+        # [0,...,0,1,...1,0,...0],
+        # where m_i = 1 iff | i - idx_a | <= 512
+        # because of causal masking, we can simplify this and always assume
+        # that we are looking back
+        scores = jnp.where(idx_a - seq_indices <= 1024, scores, -jnp.inf)
 
     return jax.nn.softmax(scores.astype(jnp.float32)).astype(scores.dtype)
 
@@ -135,13 +143,7 @@ def localAttn(Ks, Vs, Qs, pos_a, seq_indices) -> jax.Array:
     """
 
     def new_a(Ks, Vs, Q_a, idx_a, seq_indices) -> jax.Array:
-        scores = AttnScores(Q_a, Ks, idx_a, seq_indices)
-
-        # we need a mask m of the form
-        # [0,...,0,1,...1,0,...0],
-        # where m_i = 1 iff | i - idx_a | <= 1024
-        scores = jnp.where(jnp.abs(seq_indices - idx_a) <= 1024, scores, -jnp.inf)
-
+        scores = AttnScores(Q_a, Ks, idx_a, seq_indices, local_attn=True)
         return scores @ Vs
 
     return jax.vmap(
