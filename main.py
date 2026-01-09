@@ -5,8 +5,8 @@ load_dotenv()
 import jax
 import os
 
-os.environ["XLA_FLAGS"] = "--xla_force_host_platform_device_count=8"
-print("Forcing the use of 8 devices.")
+# os.environ["XLA_FLAGS"] = "--xla_force_host_platform_device_count=8"
+# print("Forcing the use of 8 devices.")
 
 
 def init_dist():
