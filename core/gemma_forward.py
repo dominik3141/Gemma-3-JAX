@@ -133,14 +133,19 @@ def localAttn(Ks, Vs, Qs, pos_a, seq_indices) -> jax.Array:
     If we are inside a local attention layer, we have to slice K and V so we only attend to the
     closest 1024 tokens.
     """
+
+    def new_a(Ks, Vs, Q_a, idx_a, seq_indices) -> jax.Array:
+        scores = AttnScores(Q_a, Ks, idx_a, seq_indices)
+
+        # we need a mask m of the form
+        # [0,...,0,1,...1,0,...0],
+        # where m_i = 1 iff | i - idx_a | <= 1024
+        scores = jnp.where(jnp.abs(seq_indices - idx_a) <= 1024, scores, -jnp.inf)
+
+        return scores @ Vs
+
     return jax.vmap(
-        lambda Ks, Vs, Q_a, idx_a, seq_indices: AttnScores(
-            Q_a,
-            jax.lax.dynamic_slice_in_dim(Ks, idx_a - 512, 1024),
-            idx_a,
-            jax.lax.dynamic_slice_in_dim(seq_indices, idx_a - 512, 1024),
-        )
-        @ jax.lax.dynamic_slice_in_dim(Vs, idx_a - 512, 1024),
+        new_a,
         in_axes=(None, None, 0, 0, None),
     )(Ks, Vs, Qs, pos_a, seq_indices)
 
