@@ -24,7 +24,7 @@ import optax
 from core.gemma_forward import Params
 from utils.sft_data import get_training_sample
 from functools import partial
-from jax.sharding import Mesh, PartitionSpec as P, NamedSharding
+from jax.sharding import Mesh, PartitionSpec, NamedSharding
 from jax.experimental import mesh_utils
 
 
@@ -62,6 +62,18 @@ def train_loop(data_sharding, batch_size, params, key) -> tuple[Params, jax.Arra
     return new_params, loss
 
 
+def param_sharding_fn(params: Params, mesh) -> dict[str, NamedSharding]:
+    sharding_dict = {}
+
+    for key in params.keys():
+        if key == "model.embed_tokens.weight":
+            sharding_dict[key] = NamedSharding(mesh, PartitionSpec("model", None))
+        else:
+            sharding_dict[key] = NamedSharding(mesh, PartitionSpec())  # replicate
+
+    return sharding_dict
+
+
 # TESTING
 def main(num_batches=100):
     print("--- supervised_train.main() started ---")
@@ -73,11 +85,17 @@ def main(num_batches=100):
 
     # Distributed training
     num_devices: int = jax.device_count()
-    device_mesh = mesh_utils.create_device_mesh((num_devices,))
-    mesh = Mesh(device_mesh, axis_names=("batch",))
-    data_sharding = NamedSharding(mesh, P("batch"))
-    param_sharding = NamedSharding(mesh, P())
-    params = jax.device_put(params, param_sharding)
+    model_axis_size = min(num_devices, 2)
+    batch_axis_size = num_devices // model_axis_size
+    device_mesh = mesh_utils.create_device_mesh((batch_axis_size, model_axis_size))
+    mesh = Mesh(device_mesh, axis_names=("batch", "model"))
+    data_sharding = NamedSharding(mesh, PartitionSpec("batch"))
+    param_shardings = param_sharding_fn(params, mesh)
+    params = jax.tree.map(
+        lambda M, sharding: jax.device_put(M, sharding),
+        params,
+        param_shardings,
+    )
 
     # Config
     batch_size = num_devices * 2
