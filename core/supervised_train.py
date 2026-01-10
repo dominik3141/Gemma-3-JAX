@@ -103,12 +103,11 @@ def main(num_batches=100):
     # do stuff
     keys = jax.random.split(key, num_devices * num_batches)
 
-    with mesh:
-        params, losses = jax.lax.scan(
-            partial(train_loop, data_sharding, batch_size),
-            params,
-            keys,
-        )
+    params, losses = jax.lax.scan(
+        partial(train_loop, data_sharding, batch_size),
+        params,
+        keys,
+    )
 
     print("XLA retuned control")
     print(losses)
