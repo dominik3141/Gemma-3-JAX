@@ -3,7 +3,7 @@ name = "jax-gemma-1b"
 version = "0.1.0"
 description = "Add your description here"
 readme = "README.md"
-requires-python = ">=3.12"
+requires-python = ">=3.11"
 dependencies = [
     "jax>=0.8.2",
     "google-cloud-storage>=2.18.0",
@@ -15,6 +15,8 @@ dependencies = [
     "sentencepiece>=0.2.1",
     "python-dotenv>=1.0.0",
     "google-cloud-logging>=3.13.0",
+    "tensorboard-plugin-profile>=2.21.3",
+    "tensorboard>=2.18.0",
 ]
 
 [project.optional-dependencies]

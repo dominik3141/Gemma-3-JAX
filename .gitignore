@@ -29,3 +29,6 @@ notebooks/
 # Temporary artifacts
 source_*.tar.gz
 dev_sync.tar.gz.env
+
+# profiles
+jax-trace/
