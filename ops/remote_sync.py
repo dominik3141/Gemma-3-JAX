@@ -8,9 +8,6 @@ import argparse
 import subprocess
 import os
 
-DEFAULT_VM_NAME = "gemma-dev-1"
-DEFAULT_ZONE = "us-west4-a"
-
 
 def run(cmd):
     print(f"Running: {' '.join(cmd)}")
@@ -135,8 +132,8 @@ def sync_code(vm_name, zone, is_tpu):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--vm", default=DEFAULT_VM_NAME, help="Name of the VM")
-    parser.add_argument("--zone", default=DEFAULT_ZONE, help="Zone of the VM")
+    parser.add_argument("--vm", required=True, help="Name of the VM")
+    parser.add_argument("--zone", required=True, help="Zone of the VM")
     parser.add_argument("--tpu", action="store_true", help="Is this a TPU VM?")
     args = parser.parse_args()
 
