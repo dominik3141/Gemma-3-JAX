@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import argparse
 import re
 from typing import Dict, Tuple
 
@@ -125,13 +126,81 @@ def repack_layers_to_stacked_safetensors(
     save_file(out_tensors, out_path)
 
 
-# Example usage:
-if __name__ == "__main__":
-    repack_layers_to_stacked_safetensors(
-        in_path="model.safetensors",
-        out_path="model_stacked.safetensors",
-        layers_out_prefix="model.layers_stacked.",
-        keep_original_layer_tensors=False,
-        strict=True,
+def unstack_layers_from_safetensors(
+    in_path: str,
+    out_path: str,
+    *,
+    layers_in_prefix: str = "model.layers_stacked.",
+    layer_out_pattern: str = "model.layers.{i}.{suffix}",
+) -> None:
+    """
+    Reverse conversion:
+      - Reads a safetensors file with stacked tensors like `layers_in_prefix + suffix`.
+      - Unstacks each into individual layers `model.layers.i.suffix`.
+    """
+    with safe_open(in_path, framework="np", device="cpu") as f:
+        keys = list(f.keys())
+        out_tensors: Dict[str, np.ndarray] = {}
+
+        for k in keys:
+            if k.startswith(layers_in_prefix):
+                suffix = k[len(layers_in_prefix) :]
+                stacked_arr = f.get_tensor(k)
+                # Unstack along axis 0
+                for i in range(stacked_arr.shape[0]):
+                    layer_key = layer_out_pattern.format(i=i, suffix=suffix)
+                    out_tensors[layer_key] = stacked_arr[i]
+            else:
+                out_tensors[k] = f.get_tensor(k)
+
+    save_file(out_tensors, out_path)
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(
+        description="Stack or unstack Gemma layers in safetensors."
     )
-    print("Wrote model_stacked.safetensors")
+    parser.add_argument(
+        "--input", "-i", type=str, required=True, help="Input safetensors file"
+    )
+    parser.add_argument(
+        "--output", "-o", type=str, required=True, help="Output safetensors file"
+    )
+    parser.add_argument(
+        "--unstack",
+        action="store_true",
+        help="Unstack weights instead of stacking them",
+    )
+    parser.add_argument(
+        "--prefix",
+        type=str,
+        default="model.layers_stacked.",
+        help="Prefix for stacked tensors (default: model.layers_stacked.)",
+    )
+    parser.add_argument(
+        "--keep-original",
+        action="store_true",
+        help="Keep original layer tensors when stacking (ignored when unstacking)",
+    )
+
+    args = parser.parse_args()
+
+    if args.unstack:
+        unstack_layers_from_safetensors(
+            in_path=args.input,
+            out_path=args.output,
+            layers_in_prefix=args.prefix,
+        )
+        print(f"Unstacked layers from {args.input} to {args.output}")
+    else:
+        repack_layers_to_stacked_safetensors(
+            in_path=args.input,
+            out_path=args.output,
+            layers_out_prefix=args.prefix,
+            keep_original_layer_tensors=args.keep_original,
+        )
+        print(f"Stacked layers from {args.input} to {args.output}")
+
+
+if __name__ == "__main__":
+    main()
