@@ -38,5 +38,21 @@ def reward(output_tokens) -> jax.Array:
     pass
 
 
+def objective_function() -> jax.Array:
+    r"""
+    The GRPO objective function that we can then differentiate with repect to the policy parameters \theta.
+    The objective function is given by
+        J(\theta) = E_{q \sim P(Q), {o_i}_{i=1}^G \sim \pi_{\theta_old}} \\
+            [
+                1/G \Sum_{i = 1}^G min
+                (
+                    r_i(\theta), A_i),
+                    clip(r_i(\theta), 1-\epsilon, 1+\epsilon )
+                ) A_i - \beta KL(\pi_\theta, \pi_{theta_old})
+            ]
+    """
+    pass
+
+
 def rl_iteration(group_size):
     pass
