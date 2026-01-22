@@ -17,7 +17,24 @@ Stuff to fix:
 -   We need a forward function that is optimized for inference
 """
 
+MAX_ROOT = 90000000
+MIN_ROOT = 1000
+SAMPLE_TEMP = 1  # as suggested by R1 paper
+GROUP_SIZE = 16  # as suggested by R1 paper
+
 import jax
+
+
+def sample_with_temp(
+    key: jax.random.PRNGKey, xs: jax.Array, temperature: float
+) -> jax.Array:
+    """
+    Only here to provide a function with the right signature for now, will later on be relocated
+    to our new inference optimized forward function.
+
+    This function should sample according to temperature until we reach the EOS token.
+    """
+    pass
 
 
 def get_prompt(n: int) -> jax.Array:
@@ -83,7 +100,7 @@ def ratio() -> jax.Array:
     pass
 
 
-def prop_of_grp_elem():
+def prop_of_trajectory():
     r"""
     The probability of a given trajectory o_i is defined as the (conditional) probability
     of every token, so
@@ -92,5 +109,24 @@ def prop_of_grp_elem():
     pass
 
 
-def rl_iteration(group_size):
+def KL() -> jax.Array:
+    r"""
+    Calculates KL(\pi_\theta, \pi_{\theta_old}).
+    """
     pass
+
+
+def get_group(key: jax.random.PRNGKey, group_size: int) -> jax.Array:
+    """
+    Samples a group of responses.
+    """
+    key, subkey = jax.random.split(key)
+    int_to_radicate = jax.random.randint(subkey, 1, MIN_ROOT, MAX_ROOT)
+
+    prompt = get_prompt(int_to_radicate)  # prompt is the same for the whole group
+
+    all_keys = jax.random.split(key, group_size + 1)
+    key, traj_keys = all_keys[0], all_keys[1:]
+    group = jax.vmap(lambda key: sample_with_temp(key, prompt, SAMPLE_TEMP))(traj_keys)
+
+    return group
