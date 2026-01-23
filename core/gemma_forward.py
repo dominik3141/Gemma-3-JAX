@@ -227,7 +227,7 @@ def Block(xs: jax.Array, scans) -> jax.Array:
         in_axes=(None, None, 0, None, None),
     )(Ks, Vs, Qss, pos, is_local_attn)
     xs = jnp.transpose(xs, (1, 0, 2))  # (Seq, 4, 256)
-    xs = jnp.reshape(xs, (sequence_len, 1024))
+    xs = jnp.reshape(xs, (sequence_len, 4 * 256))  # concat heads
 
     xs = jax.vmap(postAttn, in_axes=(0, 0, None))(xs, xs_og, block_params)
 
