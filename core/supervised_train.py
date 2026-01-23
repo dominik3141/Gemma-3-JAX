@@ -109,7 +109,7 @@ def main(num_batches=100):
         keys,
     )
 
-    print("XLA retuned control")
+    print("XLA returned control")
     print(losses)
 
     # Save params to GCS (defaults to project bucket if env not set)

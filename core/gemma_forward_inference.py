@@ -6,16 +6,16 @@ values for each layer to have been calculated prior to the invocation of our new
 
 I'm not yet sure whether we should reuse our current forward function in `gemma_forward.py` for the prefill
 step that is supposed to provide us with the prior K,V values, or if we need a third forward function.
-We would loose some compute efficency by reusing our current forward function as it is optimized
+We would lose some compute efficiency by reusing our current forward function as it is optimized
 for pretraining and calculates the next token as every position, while for prefill we would only need
 it to calculate the K,V values.
 
 This is all getting a bit messy, but it looks like we can hardly avoid duplicating logic if we don't want
-to accept a lot of conditional branching, which might make our code less efficent (and which generally
+to accept a lot of conditional branching, which might make our code less efficient (and which generally
 isn't something I would consider good style).
 
 TODO:
-    - Extract the logic that is shared among all forward functions to a seperate file (RMSNorm etc.)
+    - Extract the logic that is shared among all forward functions to a separate file (RMSNorm etc.)
 """
 
 import jax
@@ -49,7 +49,7 @@ def Block_KV_cached(inits, scans) -> jax.Array:
     Vs = jnp.concatenate([Vs_cached, V_new])  # assuming seq_length is first dim
 
     # COMMUNICATION WITH OTHER TOKENS
-    # first we go one level down to parralelize over the four Qs
+    # first we go one level down to parallelize over the four Qs
     x = jax.vmap(attnHead, in_axes=(None, None, 0, None, None))(
         Ks, Vs, Qs, pos, is_local_attn
     )
@@ -70,7 +70,7 @@ def forward_single(
     positional embedding.
     Returns predicted next token as well as updated K,V cache.
     """
-    # embedd the token
+    # embed the token
     x = params["model.embed_tokens.weight"][x]
 
     # normalize according to Gemma reference implementation
