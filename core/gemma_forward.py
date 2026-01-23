@@ -223,7 +223,7 @@ def Block(xs: jax.Array, scans) -> jax.Array:
     # first we go onto the level of individual heads
     Qss = jnp.transpose(Qss, (1, 0, 2))  # head dimension should be first
     xs = jax.vmap(
-        lambda Ks, Vs, Qs, idx, is_local_attn: attnHead(Ks, Vs, Qs, idx, is_local_attn),
+        attnHead,
         in_axes=(None, None, 0, None, None),
     )(Ks, Vs, Qss, pos, is_local_attn)
     xs = jnp.transpose(xs, (1, 0, 2))  # (Seq, 4, 256)
