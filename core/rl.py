@@ -21,7 +21,6 @@ MAX_ROOT = 90000000
 MIN_ROOT = 1000
 SAMPLE_TEMP = 1  # as suggested by R1 paper
 GROUP_SIZE = 16  # as suggested by R1 paper
-END_OF_TURN_TOKEN = 106
 
 import jax
 from core.gemma_forward import forward, Params
@@ -51,7 +50,9 @@ def sample_with_temp(
         next_token = jax.random.categorical(subkey, next_token_logits / temperature)
         xs = jax.numpy.concatenate([xs, next_token])
 
-        if next_token == END_OF_TURN_TOKEN:
+        # check for </answer> tag (serves as EOS)
+        answer_tag_tokens = jax.numpy.array([954, 14433, 236813])
+        if xs.shape[0] >= 3 and jax.numpy.array_equal(xs[-3:], answer_tag_tokens):
             break
 
     return xs
@@ -66,7 +67,7 @@ def get_prompt(n: int) -> jax.Array:
 The assistant first thinks about the reasoning process in the mind and then provides the user with the answer. The reasoning process and answer are enclosed within <think>...</think> and <answer>...</answer> tags, respectively, i.e., <think> reasoning process here </think> <answer> answer here </answer>.
 User: Calculate the square root of {n} up to three decimal places. Assistant:"""
 
-    return tokenize_text(prompt)
+    return jax.numpy.array(tokenize_text(prompt))
 
 
 def reward(output_tokens) -> jax.Array:
