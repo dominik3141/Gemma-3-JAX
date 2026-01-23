@@ -21,8 +21,10 @@ MAX_ROOT = 90000000
 MIN_ROOT = 1000
 SAMPLE_TEMP = 1  # as suggested by R1 paper
 GROUP_SIZE = 16  # as suggested by R1 paper
+MAX_RESPONSE_LENGTH = 1024
 
 import jax
+import jax.numpy as jnp
 from core.gemma_forward import forward, Params
 from utils.inspect_weights import load_weights_as_dict
 from utils.tokenize import tokenize_text
@@ -38,21 +40,26 @@ def sample_with_temp(
     This function should sample according to temperature until we reach the EOS token.
 
     CURRENT PROBLEMS:
-        - forward called with different input shapes as padding happens inside the forward -> constant jit recompilation
         - no KV caching
         - should be a jax.scan instead of a loop
     """
     while True:
-        key, subkey = jax.random.split(key)
-        next_token_logits = forward(xs, params)
+        # padding
+        input_length = xs.shape[0]
+        padding_tokens = max(0, MAX_RESPONSE_LENGTH - input_length)
+        xs_padded = jnp.concatenate([xs, jnp.zeros_like(xs, shape=(padding_tokens,))])
+
+        # forward
+        next_token_logits = forward(xs_padded, params)
 
         # sample
+        key, subkey = jax.random.split(key)
         next_token = jax.random.categorical(subkey, next_token_logits / temperature)
-        xs = jax.numpy.concatenate([xs, next_token])
+        xs = jnp.concatenate([xs, next_token])
 
         # check for </answer> tag (serves as EOS)
-        answer_tag_tokens = jax.numpy.array([954, 14433, 236813])
-        if xs.shape[0] >= 3 and jax.numpy.array_equal(xs[-3:], answer_tag_tokens):
+        answer_tag_tokens = jnp.array([954, 14433, 236813])
+        if xs.shape[0] >= 3 and jnp.array_equal(xs[-3:], answer_tag_tokens):
             break
 
     return xs
@@ -67,7 +74,7 @@ def get_prompt(n: int) -> jax.Array:
 The assistant first thinks about the reasoning process in the mind and then provides the user with the answer. The reasoning process and answer are enclosed within <think>...</think> and <answer>...</answer> tags, respectively, i.e., <think> reasoning process here </think> <answer> answer here </answer>.
 User: Calculate the square root of {n} up to three decimal places. Assistant:"""
 
-    return jax.numpy.array(tokenize_text(prompt))
+    return jnp.array(tokenize_text(prompt))
 
 
 def reward(output_tokens) -> jax.Array:
@@ -107,8 +114,8 @@ def advantage(r_t: jax.Array) -> jax.Array:
 
     Needs global information from the whole group.
     """
-    mean = jax.numpy.mean(r_t)
-    std = jax.numpy.std(r_t)
+    mean = jnp.mean(r_t)
+    std = jnp.std(r_t)
 
     return r_t * (-mean / std)
 
