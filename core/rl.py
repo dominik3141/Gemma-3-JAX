@@ -25,7 +25,7 @@ MAX_RESPONSE_LENGTH = 1024
 
 import jax
 import jax.numpy as jnp
-from core.gemma_forward import forward, Params
+from core.gemma_forward import Params, forward_single
 from utils.inspect_weights import load_weights_as_dict
 from utils.tokenize import tokenize_text
 
@@ -41,26 +41,28 @@ def sample_with_temp(
 
     CURRENT PROBLEMS:
         - no KV caching
-        - should be a jax.scan instead of a loop
     """
-    while True:
-        # padding
-        input_length = xs.shape[0]
-        padding_tokens = max(0, MAX_RESPONSE_LENGTH - input_length)
-        xs_padded = jnp.concatenate([xs, jnp.zeros_like(xs, shape=(padding_tokens,))])
 
-        # forward
-        next_token_logits = forward(xs_padded, params)
+    def sampling_loop(init, carry) -> jax.Array:
+        key = init
+        xs, i = carry
 
-        # sample
-        key, subkey = jax.random.split(key)
-        next_token = jax.random.categorical(subkey, next_token_logits / temperature)
-        xs = jnp.concatenate([xs, next_token])
+        next_token_logits = forward_single(xs, params, i)
 
-        # check for </answer> tag (serves as EOS)
-        answer_tag_tokens = jnp.array([954, 14433, 236813])
-        if xs.shape[0] >= 3 and jnp.array_equal(xs[-3:], answer_tag_tokens):
-            break
+        next_token = jax.random.categorical(key, next_token_logits / temperature)
+
+        xs[i] = next_token  # doesn't work in JAX, but correct logic
+
+        return xs
+
+    # padding
+    input_length = xs.shape[0]
+    padding_tokens = max(0, MAX_RESPONSE_LENGTH - input_length)
+    xs = jnp.concatenate([xs, jnp.zeros_like(xs, shape=(padding_tokens,))])
+
+    # forward scan
+    key, *keys = jax.random.split(key, MAX_RESPONSE_LENGTH + 1)
+    xs = jax.lax.scan(sampling_loop, (xs, 0), jnp.array(keys))
 
     return xs
 
