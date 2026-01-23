@@ -273,7 +273,7 @@ def forward(xs: jax.Array, params: Params) -> jax.Array:
     xs = jnp.concatenate([xs, jnp.zeros_like(xs, shape=(padding_tokens,))])
 
     # embedding the tokens
-    xs = jax.vmap(lambda x: params["model.embed_tokens.weight"][x], in_axes=(0))(xs)
+    xs = jax.vmap(lambda x: params["model.embed_tokens.weight"][x])(xs)
 
     # normalize according to Gemma reference implementation
     xs = jnp.sqrt(1152) * xs
