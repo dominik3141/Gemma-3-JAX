@@ -52,22 +52,26 @@ def sample_with_temp(
         next_token_logits = forward_single(xs, params, i)
 
         next_token = jax.random.categorical(key, next_token_logits / temperature)
-        prob_of_next_token = jax.nn.softmax(next_token_logits)[next_token]
+        log_prob_of_next_token = jax.nn.log_softmax(next_token_logits / temperature)[
+            next_token
+        ]
 
         xs = xs.at(i).set(next_token)
 
-        return (xs, i + 1), prob_of_next_token
+        return (xs, i + 1), log_prob_of_next_token
 
     # padding
-    input_length = xs.shape[0]
+    input_length = xs.shape[0]  # length of our prompt
     padding_tokens = max(0, MAX_RESPONSE_LENGTH - input_length)
     xs = jnp.concatenate([xs, jnp.zeros_like(xs, shape=(padding_tokens,))])
 
     # forward scan
     key, *keys = jax.random.split(key, MAX_RESPONSE_LENGTH + 1)
-    (xs, _), next_token_probs = jax.lax.scan(sampling_loop, (xs, 0), jnp.array(keys))
+    (xs, _), next_token_log_probs = jax.lax.scan(
+        sampling_loop, (xs, input_length), jnp.array(keys)
+    )
 
-    return xs
+    return xs, next_token_log_probs
 
 
 def get_prompt(n: int) -> jax.Array:
@@ -122,7 +126,7 @@ def advantage(r_t: jax.Array) -> jax.Array:
     mean = jnp.mean(r_t)
     std = jnp.std(r_t)
 
-    return r_t * (-mean / std)
+    return (r_t - mean) / (std + 1e-8)
 
 
 def ratio() -> jax.Array:
