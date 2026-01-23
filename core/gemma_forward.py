@@ -234,7 +234,7 @@ def Block(xs: jax.Array, scans) -> jax.Array:
     return xs, None
 
 
-def block_params(params: Params) -> Params:
+def extract_block_params(params: Params) -> Params:
     block_params = {}
 
     for key, val in params.items():
@@ -285,7 +285,7 @@ def forward(xs: jax.Array, params: Params) -> jax.Array:
     is_local_attn = jnp.array(
         [t == "local" for t in layer_types]
     )  # shape (26,), [1,1...,1,1]
-    xs, _ = jax.lax.scan(Block, xs, (block_params(params), is_local_attn))
+    xs, _ = jax.lax.scan(Block, xs, (extract_block_params(params), is_local_attn))
 
     # remove padding again (to save memory)
     xs = xs[:input_length]
