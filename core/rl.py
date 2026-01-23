@@ -21,20 +21,40 @@ MAX_ROOT = 90000000
 MIN_ROOT = 1000
 SAMPLE_TEMP = 1  # as suggested by R1 paper
 GROUP_SIZE = 16  # as suggested by R1 paper
+END_OF_TURN_TOKEN = 106
 
 import jax
+from core.gemma_forward import forward, Params
+from utils.inspect_weights import load_weights_as_dict
+from utils.tokenize import tokenize_text
 
 
 def sample_with_temp(
-    key: jax.random.PRNGKey, xs: jax.Array, temperature: float
+    key: jax.random.PRNGKey, xs: jax.Array, temperature: float, params: Params
 ) -> jax.Array:
     """
     Only here to provide a function with the right signature for now, will later on be relocated
     to our new inference optimized forward function.
 
     This function should sample according to temperature until we reach the EOS token.
+
+    CURRENT PROBLEMS:
+        - forward called with different input shapes as padding happens inside the forward -> constant jit recompilation
+        - no KV caching
+        - should be a jax.scan instead of a loop
     """
-    pass
+    while True:
+        key, subkey = jax.random.split(key)
+        next_token_logits = forward(xs, params)
+
+        # sample
+        next_token = jax.random.categorical(subkey, next_token_logits / temperature)
+        xs = jax.numpy.concatenate([xs, next_token])
+
+        if next_token == END_OF_TURN_TOKEN:
+            break
+
+    return xs
 
 
 def get_prompt(n: int) -> jax.Array:
@@ -44,7 +64,9 @@ def get_prompt(n: int) -> jax.Array:
     The model should be instructed to return the final results in a specific format
     so we can later easily check for correctness.
     """
-    pass
+    prompt = f"Calculate the square root of {n} up to three decimal places."
+
+    return tokenize_text(prompt)
 
 
 def reward(output_tokens) -> jax.Array:
@@ -116,7 +138,7 @@ def KL() -> jax.Array:
     pass
 
 
-def get_group(key: jax.random.PRNGKey, group_size: int) -> jax.Array:
+def get_group(key: jax.random.PRNGKey, group_size: int, params: Params) -> jax.Array:
     """
     Samples a group of responses.
     """
@@ -127,6 +149,13 @@ def get_group(key: jax.random.PRNGKey, group_size: int) -> jax.Array:
 
     all_keys = jax.random.split(key, group_size + 1)
     key, traj_keys = all_keys[0], all_keys[1:]
-    group = jax.vmap(lambda key: sample_with_temp(key, prompt, SAMPLE_TEMP))(traj_keys)
+    group = jax.vmap(lambda key: sample_with_temp(key, prompt, SAMPLE_TEMP, params))(
+        traj_keys
+    )
 
     return group
+
+
+key = jax.random.PRNGKey(42)
+params = load_weights_as_dict("data/model_stacked_it.safetensors")
+grp = get_group(key, 16, params)
