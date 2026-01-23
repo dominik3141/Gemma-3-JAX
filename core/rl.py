@@ -51,10 +51,11 @@ def sample_with_temp(
 
         next_token_logits = forward_single(xs, params, i)
 
-        next_token = jax.random.categorical(key, next_token_logits / temperature)
-        log_prob_of_next_token = jax.nn.log_softmax(next_token_logits / temperature)[
+        temp_next_token_logits = next_token_logits / temperature
+        next_token = jax.random.categorical(key, temp_next_token_logits)
+        log_prob_of_next_token = temp_next_token_logits[
             next_token
-        ]
+        ] - jax.scipy.special.logsumexp(temp_next_token_logits)
 
         xs = xs.at(i).set(next_token)
 
@@ -66,7 +67,7 @@ def sample_with_temp(
     xs = jnp.concatenate([xs, jnp.zeros_like(xs, shape=(padding_tokens,))])
 
     # forward scan
-    key, *keys = jax.random.split(key, MAX_RESPONSE_LENGTH + 1)
+    key, *keys = jax.random.split(key, MAX_RESPONSE_LENGTH - input_length + 1)
     (xs, _), next_token_log_probs = jax.lax.scan(
         sampling_loop, (xs, input_length), jnp.array(keys)
     )
