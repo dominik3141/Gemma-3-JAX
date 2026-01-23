@@ -297,14 +297,3 @@ def forward(xs: jax.Array, params: Params) -> jax.Array:
     xs = jax.vmap(lambda x: params["model.embed_tokens.weight"] @ x)(xs)
 
     return xs
-
-
-def forward_single(xs: jax.Array, params: Params, pos: int):
-    """
-    Our forward function calculates the next token for every token, which is what
-    we want for pretraining, but if we just want to get the next token from a sequence
-    of tokens we waste a lot of compute (O(n) vs O(n^2)).
-    This function only calculates the new value of the token at pos based on the tokens
-    prior to pos.
-    """
-    pass
