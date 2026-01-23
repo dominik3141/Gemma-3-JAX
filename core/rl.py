@@ -37,7 +37,9 @@ def sample_with_temp(
     Only here to provide a function with the right signature for now, will later on be relocated
     to our new inference optimized forward function.
 
-    This function should sample according to temperature until we reach the EOS token.
+    This function should sample according to a given temperature for a fixed length.
+    We return both the autoregressively completed sequence and the probability of the given trajectory at
+    sampling time.
 
     CURRENT PROBLEMS:
         - no KV caching
@@ -50,10 +52,11 @@ def sample_with_temp(
         next_token_logits = forward_single(xs, params, i)
 
         next_token = jax.random.categorical(key, next_token_logits / temperature)
+        prob_of_next_token = jax.nn.softmax(next_token_logits)[next_token]
 
-        xs[i] = next_token  # doesn't work in JAX, but correct logic
+        xs = xs.at(i).set(next_token)
 
-        return xs
+        return (xs, i + 1), prob_of_next_token
 
     # padding
     input_length = xs.shape[0]
@@ -62,7 +65,7 @@ def sample_with_temp(
 
     # forward scan
     key, *keys = jax.random.split(key, MAX_RESPONSE_LENGTH + 1)
-    xs = jax.lax.scan(sampling_loop, (xs, 0), jnp.array(keys))
+    (xs, _), next_token_probs = jax.lax.scan(sampling_loop, (xs, 0), jnp.array(keys))
 
     return xs
 
@@ -89,7 +92,7 @@ def reward(output_tokens) -> jax.Array:
 
 def objective_function() -> jax.Array:
     r"""
-    The GRPO objective function that we can then differentiate with repect to the policy parameters \theta.
+    The GRPO objective function that we can then differentiate with respect to the policy parameters \theta.
 
     Let G = {o_1,..., o_n} be a set (called group) of outputs for a given prompt q.
     The objective function is given by
