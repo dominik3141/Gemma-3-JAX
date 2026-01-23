@@ -267,6 +267,7 @@ def forward(xs: jax.Array, params: Params) -> jax.Array:
     # we enforce a minimum sequence length of 1024 tokens in order to guarantee
     # that there are enough tokens for proper dynamic slicing during the local attention
     # layers
+    # To avoid constant jit recompilation the padding should already have been added by the caller
     input_length = xs.shape[0]
     padding_tokens = max(0, 1024 - input_length)
     xs = jnp.concatenate([xs, jnp.zeros_like(xs, shape=(padding_tokens,))])
