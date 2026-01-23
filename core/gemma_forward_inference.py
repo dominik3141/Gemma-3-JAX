@@ -20,7 +20,7 @@ TODO:
 
 import jax
 import jax.numpy as jnp
-from gemma_forward import (
+from core.gemma_forward import (
     Params,
     RMSNorm,
     attnHead,
@@ -94,3 +94,38 @@ def forward_single(
     x = params["model.embed_tokens.weight"] @ x
 
     return x
+
+
+def main() -> None:
+    """Simple test function for forward_single."""
+    from utils.inspect_weights import load_weights_as_dict
+
+    key = jax.random.PRNGKey(42)
+
+    # Load actual parameters
+    print("Loading weights...")
+    params = load_weights_as_dict("data/model_stacked_pt.safetensors")
+    print("Weights loaded.")
+
+    # Random token ID
+    token_id = jnp.array(123)
+
+    # Random cached K and V vectors (for previous tokens)
+    seq_len = 10
+    head_dim = 256
+    Ks_cached = jax.random.normal(key, (seq_len, head_dim))
+    Vs_cached = jax.random.normal(key, (seq_len, head_dim))
+
+    # Position in sequence
+    pos = seq_len
+
+    # Run forward_single
+    logits = forward_single(token_id, params, pos, Ks_cached, Vs_cached)
+
+    print(f"Input token: {token_id}")
+    print(f"Output logits shape: {logits.shape}")
+    print(f"Output logits sample: {logits[:5]}")
+
+
+if __name__ == "__main__":
+    main()
