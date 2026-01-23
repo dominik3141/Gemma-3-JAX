@@ -59,12 +59,12 @@ def sample_with_temp(
 
 def get_prompt(n: int) -> jax.Array:
     r"""
-    Should return the tokens of a prompt to calculate the square root of
-    the given integer.
-    The model should be instructed to return the final results in a specific format
-    so we can later easily check for correctness.
+    Returns the tokens of a prompt to calculate the square root of n,
+    wrapped in the DeepSeek-R1-Zero system template.
     """
-    prompt = f"Calculate the square root of {n} up to three decimal places."
+    prompt = f"""A conversation between User and Assistant. The user asks a question, and the Assistant solves it.
+The assistant first thinks about the reasoning process in the mind and then provides the user with the answer. The reasoning process and answer are enclosed within <think>...</think> and <answer>...</answer> tags, respectively, i.e., <think> reasoning process here </think> <answer> answer here </answer>.
+User: Calculate the square root of {n} up to three decimal places. Assistant:"""
 
     return tokenize_text(prompt)
 
@@ -157,5 +157,6 @@ def get_group(key: jax.random.PRNGKey, group_size: int, params: Params) -> jax.A
 
 
 key = jax.random.PRNGKey(42)
-params = load_weights_as_dict("data/model_stacked_it.safetensors")
+params = load_weights_as_dict("data/model_stacked_pt.safetensors")
 grp = get_group(key, 16, params)
+print(grp)
