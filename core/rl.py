@@ -21,14 +21,14 @@ MAX_ROOT = 90000000
 MIN_ROOT = 1000
 SAMPLE_TEMP = 1  # as suggested by R1 paper
 GROUP_SIZE = 16  # as suggested by R1 paper
-MAX_RESPONSE_LENGTH = 1024
+MAX_RESPONSE_LENGTH = 250
 
 import jax
 import jax.numpy as jnp
 from core.gemma_forward import Params
 from core.gemma_forward_inference import forward_single, get_KV
 from utils.inspect_weights import load_weights_as_dict
-from utils.tokenize import detokenize_ids, tokenize_text
+from utils.tokenize import tokenize_text, detokenize_ids
 
 
 def sample_with_temp(
@@ -155,7 +155,9 @@ def KL() -> jax.Array:
     pass
 
 
-def get_group(key: jax.random.PRNGKey, group_size: int, params: Params) -> jax.Array:
+def get_group(
+    key: jax.random.PRNGKey, group_size: int, params: Params
+) -> tuple[jax.Array, jax.Array]:
     """
     Samples a group of responses.
 
@@ -168,32 +170,32 @@ def get_group(key: jax.random.PRNGKey, group_size: int, params: Params) -> jax.A
 
     prompt = get_prompt(int_to_radicate)  # prompt is the same for the whole group
 
-    all_keys = jax.random.split(key, group_size + 1)
-    key, traj_keys = all_keys[0], all_keys[1:]
-    group = jax.vmap(lambda key: sample_with_temp(key, prompt, SAMPLE_TEMP, params))(
-        traj_keys
-    )
+    # calculate the KV cache of the prompt
+    K_cache, V_cache = get_KV(prompt, params, MAX_RESPONSE_LENGTH)
 
-    return group
+    all_keys = jax.random.split(key, group_size + 1)
+    key, group_keys = all_keys[0], all_keys[1:]
+    responses, log_probs = jax.vmap(
+        lambda key: sample_with_temp(
+            key,
+            params,
+            prompt[-1],
+            len(prompt) - 1,
+            K_cache,
+            V_cache,
+            1,
+            MAX_RESPONSE_LENGTH - len(prompt),
+        )
+    )(group_keys)
+
+    return responses, log_probs
 
 
 key = jax.random.PRNGKey(42)
 params = load_weights_as_dict("data/model_stacked_pt.safetensors")
 
-prompt = get_prompt(42)
+grp, log_probs = get_group(key, 8, params)
 
-# get KV cache for the prompt
-K_cache, V_cache = get_KV(prompt, params, MAX_RESPONSE_LENGTH)
-print(K_cache.shape)
-
-xs, log_probs = sample_with_temp(
-    key, params, prompt[-1], len(prompt) - 1, K_cache, V_cache, SAMPLE_TEMP, 15
-)
-
-print(xs)
-print(xs.shape)
-
-print(detokenize_ids(xs.tolist()))
-print(log_probs)
-print(f"Probabilities per transition {jnp.exp(log_probs)}")
-print(f"Probability of output {jnp.exp(jnp.sum(log_probs))}")
+for i, response_tokens in enumerate(grp):
+    text = detokenize_ids(response_tokens.tolist())
+    print(f"Response {i}:\n{text}\n{'-' * 20}")
