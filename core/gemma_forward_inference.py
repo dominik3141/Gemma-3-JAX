@@ -105,7 +105,7 @@ def forward_single(
 
     # map to logits
     x = params["model.embed_tokens.weight"] @ x
-
+    
     return x, Ks_cached, Vs_cached
 
 

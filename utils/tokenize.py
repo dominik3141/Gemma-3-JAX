@@ -25,3 +25,8 @@ def tokenize_text(text: str) -> list[int]:
     if not text.isascii():
         raise ValueError("Input must be ASCII-only.")
     return _load_tokenizer().EncodeAsIds(text)
+
+
+def detokenize_ids(ids: list[int]) -> str:
+    """Detokenizes a list of IDs using the Gemma 3 tokenizer."""
+    return _load_tokenizer().DecodeIds(ids)
