@@ -15,6 +15,7 @@ to accept a lot of conditional branching, which might make our code less efficie
 isn't something I would consider good style).
 
 TODO:
+    - KV cache needs padding, currently we jit recompile at every step
     - Extract the logic that is shared among all forward functions to a separate file (RMSNorm etc.)
 """
 
@@ -110,40 +111,71 @@ def forward_single(
 
 
 def main() -> None:
-    """Simple test function for forward_single."""
+    """Test function for forward_single with actual generation."""
     from utils.inspect_weights import load_weights_as_dict
+    from utils.tokenize import tokenize_text, detokenize_ids
 
-    key = jax.random.PRNGKey(42)
-
-    # Load actual parameters
-    print("Loading weights...")
+    print("Loading weights from data/model_stacked_pt.safetensors...")
     params = load_weights_as_dict("data/model_stacked_pt.safetensors")
     print("Weights loaded.")
 
-    # Random token ID
-    token_id = jnp.array(123)
+    prompt = "The capital of France is Paris. The capital of Germany is"
+    tokens = tokenize_text(prompt)
 
-    # Random cached K and V vectors (for previous tokens)
-    # Need per-layer caches: shape (num_layers, seq_len, head_dim)
+    # Add BOS token (2) if not present
+    if tokens[0] != 2:
+        tokens = [2] + tokens
+
+    print(f"Prompt: '{prompt}'")
+    print(f"Tokens: {tokens}")
+
+    # Initialize cache
     num_layers = 26
-    seq_len = 10
     head_dim = 256
-    Ks_cached = jax.random.normal(key, (num_layers, seq_len, head_dim)).astype(
-        jnp.bfloat16
-    )
-    Vs_cached = jax.random.normal(key, (num_layers, seq_len, head_dim)).astype(
-        jnp.bfloat16
-    )
 
-    # Position in sequence
-    pos = seq_len
+    # Initialize with size 0 in sequence dimension
+    Ks_cached = jnp.zeros((num_layers, 0, head_dim), dtype=jnp.bfloat16)
+    Vs_cached = jnp.zeros((num_layers, 0, head_dim), dtype=jnp.bfloat16)
 
-    # Run forward_single
-    logits = forward_single(token_id, params, pos, Ks_cached, Vs_cached)
+    print("Processing prompt (prefill)...")
+    logits = None
 
-    print(f"Input token: {token_id}")
-    print(f"Output logits shape: {logits.shape}")
-    print(f"Output logits sample: {logits[:5]}")
+    # Process each token in the prompt
+    for i, token in enumerate(tokens):
+        token_id = jnp.array(token)
+        pos = i  # Position in sequence
+
+        logits, Ks_cached, Vs_cached = forward_single(
+            token_id, params, pos, Ks_cached, Vs_cached
+        )
+
+    print("Prompt processed.")
+
+    # Generate new tokens
+    print("Generating...")
+    generated_tokens = []
+    max_new_tokens = 10
+
+    curr_pos = len(tokens)
+
+    for i in range(max_new_tokens):
+        # Sample from logits (greedy)
+        next_token = jnp.argmax(logits).item()
+        generated_tokens.append(next_token)
+
+        # Decode so far
+        current_text = detokenize_ids(tokens + generated_tokens)
+        print(f"Step {i}: token {next_token} -> {repr(current_text)}")
+
+        # Feed back
+        token_id = jnp.array(next_token)
+        logits, Ks_cached, Vs_cached = forward_single(
+            token_id, params, curr_pos, Ks_cached, Vs_cached
+        )
+        curr_pos += 1
+
+    final_text = detokenize_ids(tokens + generated_tokens)
+    print(f"Final output: {final_text}")
 
 
 if __name__ == "__main__":
