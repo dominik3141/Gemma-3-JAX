@@ -15,7 +15,6 @@ to accept a lot of conditional branching, which might make our code less efficie
 isn't something I would consider good style).
 
 TODO:
-    - KV cache needs padding, currently we jit recompile at every step
     - Extract the logic that is shared among all forward functions to a separate file (RMSNorm etc.)
 """
 
@@ -46,18 +45,16 @@ def Block_KV_cached(inits, scans) -> jax.Array:
 
     # Calculate comm vectors for new token
     K_new, V_new, Qs = calc_qkv(x, block_params, pos, is_local_attn)
-    # add sequence dimension
-    K_new = jnp.expand_dims(K_new, axis=0)
-    V_new = jnp.expand_dims(V_new, axis=0)
-    Qs = jnp.expand_dims(Qs, axis=0)
-
-    # combine new comm vectors with the cached ones
-    Ks = jnp.concatenate([Ks_cached, K_new])
-    Vs = jnp.concatenate([Vs_cached, V_new])
+    
+    # Update fixed-size KV cache
+    Ks = Ks_cached.at[pos].set(K_new)
+    Vs = Vs_cached.at[pos].set(V_new)
 
     # COMMUNICATION WITH OTHER TOKENS
     # first we go one level down to parallelize over the four Qs
-    Qs = jnp.transpose(Qs, (1, 0, 2))  # head dimension should be first
+    Qs = jnp.expand_dims(Qs, axis=0)   # (1, 4, 256)
+    Qs = jnp.transpose(Qs, (1, 0, 2))  # (4, 1, 256) - head dimension should be first
+    
     pos_array = jnp.expand_dims(pos, axis=0)
     x = jax.vmap(attnHead, in_axes=(None, None, 0, None, None))(
         Ks, Vs, Qs, pos_array, is_local_attn
@@ -69,6 +66,7 @@ def Block_KV_cached(inits, scans) -> jax.Array:
     return (x, pos), (Ks, Vs)
 
 
+@jax.jit
 def forward_single(
     x: jax.Array, params: Params, pos: int, Ks_cached: jax.Array, Vs_cached: jax.Array
 ) -> tuple[jax.Array, jax.Array, jax.Array]:
@@ -132,10 +130,11 @@ def main() -> None:
     # Initialize cache
     num_layers = 26
     head_dim = 256
+    max_seq_len = 1024
 
-    # Initialize with size 0 in sequence dimension
-    Ks_cached = jnp.zeros((num_layers, 0, head_dim), dtype=jnp.bfloat16)
-    Vs_cached = jnp.zeros((num_layers, 0, head_dim), dtype=jnp.bfloat16)
+    # Initialize with fixed size
+    Ks_cached = jnp.zeros((num_layers, max_seq_len, head_dim), dtype=jnp.bfloat16)
+    Vs_cached = jnp.zeros((num_layers, max_seq_len, head_dim), dtype=jnp.bfloat16)
 
     print("Processing prompt (prefill)...")
     logits = None
