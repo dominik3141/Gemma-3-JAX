@@ -59,12 +59,16 @@ def sample_with_temp(
         logits, K_cache, V_cache = forward_single(x, params, pos, K_cache, V_cache)
 
         # sample next token
-        x = jnp.argmax(logits)  # TODO: Sample with temperature!
-        prop_of_next_token = jnp.log(logits[x])
+        key, subkey = jax.random.split(key)
+        scaled_logits = logits / jnp.maximum(temperature, 1e-8)
+        x = jax.random.categorical(subkey, scaled_logits)
+        prop_of_next_token = jax.nn.log_softmax(scaled_logits)[x]
 
         # save sampled token and probability
         xs = xs.at[i].set(x)
         log_probs = log_probs.at[i].set(prop_of_next_token)
+
+        pos += 1
 
     return xs, log_probs
 
@@ -182,7 +186,7 @@ K_cache, V_cache = get_KV(prompt, params, MAX_RESPONSE_LENGTH)
 print(K_cache.shape)
 
 xs, log_probs = sample_with_temp(
-    key, params, prompt[-1], len(prompt), K_cache, V_cache, 1, 15
+    key, params, prompt[-1], len(prompt) - 1, K_cache, V_cache, SAMPLE_TEMP, 15
 )
 
 print(xs)
