@@ -127,8 +127,8 @@ def main() -> None:
     num_layers = 26
     seq_len = 10
     head_dim = 256
-    Ks_cached = jax.random.normal(key, (num_layers, seq_len, head_dim))
-    Vs_cached = jax.random.normal(key, (num_layers, seq_len, head_dim))
+    Ks_cached = jax.random.normal(key, (num_layers, seq_len, head_dim)).astype(jnp.bfloat16)
+    Vs_cached = jax.random.normal(key, (num_layers, seq_len, head_dim)).astype(jnp.bfloat16)
 
     # Position in sequence
     pos = seq_len
