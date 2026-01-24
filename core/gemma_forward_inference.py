@@ -34,7 +34,9 @@ def Block_KV_cached(inits, scans) -> jax.Array:
     """
     Gemma block for a single token. Communication with other tokens via KV cache.
     """
-    x, pos = inits
+    x, pos = (
+        inits  # should the position really be carried? Optimally would be a closure?
+    )
     block_params, is_local_attn, Ks_cached, Vs_cached = scans
 
     # make a copy of x to keep the residual
@@ -43,21 +45,26 @@ def Block_KV_cached(inits, scans) -> jax.Array:
 
     # Calculate comm vectors for new token
     K_new, V_new, Qs = calc_qkv(x, block_params, pos, is_local_attn)
+    # add sequence dimension
+    K_new = jnp.expand_dims(K_new, axis=0)
+    V_new = jnp.expand_dims(V_new, axis=0)
+    Qs = jnp.expand_dims(Qs, axis=0)
 
     # combine new comm vectors with the cached ones
-    Ks = jnp.concatenate([Ks_cached, K_new])  # assuming seq_length is first dim
-    Vs = jnp.concatenate([Vs_cached, V_new])  # assuming seq_length is first dim
+    Ks = jnp.concatenate([Ks_cached, K_new])
+    Vs = jnp.concatenate([Vs_cached, V_new])
 
     # COMMUNICATION WITH OTHER TOKENS
     # first we go one level down to parallelize over the four Qs
+    Qs = jnp.transpose(Qs, (1, 0, 2))  # head dimension should be first
     x = jax.vmap(attnHead, in_axes=(None, None, 0, None, None))(
         Ks, Vs, Qs, pos, is_local_attn
     )
-    x = jnp.reshape(x, (1, 4 * 256))  # concat heads
+    x = jnp.reshape(x, (4 * 256))  # concat heads and remove sequence dim
 
     x = postAttn(x, x_og, block_params)
 
-    return x, (Ks, Vs)
+    return (x, pos), (Ks, Vs)
 
 
 def forward_single(
@@ -76,6 +83,9 @@ def forward_single(
     # normalize according to Gemma reference implementation
     x = jnp.sqrt(1152) * x
 
+    # single position should be wrapped in array to not confuse later vmaps
+    pos = jnp.expand_dims(jnp.array(pos), axis=0)
+
     # BLOCKS
     # Create the pattern list based on the config
     # 26 layers total: (5 local, 1 global) * 4 + 2 local
@@ -83,8 +93,10 @@ def forward_single(
     is_local_attn = jnp.array(
         [t == "local" for t in layer_types]
     )  # shape (26,), [1,1...,1,1]
-    x, (Ks_cached, Vs_cached) = Block_KV_cached(
-        (x, pos), (extract_block_params(params), is_local_attn, Ks_cached, Vs_cached)
+    (x, _), (Ks_cached, Vs_cached) = jax.lax.scan(
+        Block_KV_cached,
+        (x, pos),
+        (extract_block_params(params), is_local_attn, Ks_cached, Vs_cached),
     )
 
     # final norm
@@ -111,10 +123,12 @@ def main() -> None:
     token_id = jnp.array(123)
 
     # Random cached K and V vectors (for previous tokens)
+    # Need per-layer caches: shape (num_layers, seq_len, head_dim)
+    num_layers = 26
     seq_len = 10
     head_dim = 256
-    Ks_cached = jax.random.normal(key, (seq_len, head_dim))
-    Vs_cached = jax.random.normal(key, (seq_len, head_dim))
+    Ks_cached = jax.random.normal(key, (num_layers, seq_len, head_dim))
+    Vs_cached = jax.random.normal(key, (num_layers, seq_len, head_dim))
 
     # Position in sequence
     pos = seq_len
