@@ -49,28 +49,27 @@ def sample_with_temp(
     For efficency, this function already takes the K,V cache of the prompt and only the last prompt token.
     This way we can calculate the KV of the prompt only once and reuse this for every group element.
     """
-    x = final_prompt_token
 
-    # allocate array for sampled tokens
-    xs = jnp.zeros_like(x, shape=(sample_length), dtype=jnp.int32)
-    log_probs = jnp.zeros((sample_length))
+    def sample_loop(carry, scans):
+        x, K_cache, V_cache = carry
+        pos, key = scans
 
-    for i in range(sample_length):
         logits, K_cache, V_cache = forward_single(x, params, pos, K_cache, V_cache)
 
         # sample next token
-        key, subkey = jax.random.split(key)
         scaled_logits = logits / jnp.maximum(
             temperature, 1e-8
         )  # to support temperature=0
-        x = jax.random.categorical(subkey, scaled_logits)
-        prop_of_next_token = jax.nn.log_softmax(scaled_logits)[x]
+        x = jax.random.categorical(key, scaled_logits)
+        log_prop_of_next_token = jax.nn.log_softmax(scaled_logits)[x]
 
-        # save sampled token and probability
-        xs = xs.at[i].set(x)
-        log_probs = log_probs.at[i].set(prop_of_next_token)
+        return (x, K_cache, V_cache), (x, log_prop_of_next_token)
 
-        pos += 1
+    poss = jnp.arange(pos, pos + sample_length)
+    keys = jax.random.split(key, sample_length)
+    _, (xs, log_probs) = jax.lax.scan(
+        sample_loop, (final_prompt_token, K_cache, V_cache), (poss, keys)
+    )
 
     return xs, log_probs
 
