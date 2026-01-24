@@ -60,7 +60,9 @@ def sample_with_temp(
 
         # sample next token
         key, subkey = jax.random.split(key)
-        scaled_logits = logits / jnp.maximum(temperature, 1e-8)
+        scaled_logits = logits / jnp.maximum(
+            temperature, 1e-8
+        )  # to support temperature=0
         x = jax.random.categorical(subkey, scaled_logits)
         prop_of_next_token = jax.nn.log_softmax(scaled_logits)[x]
 
