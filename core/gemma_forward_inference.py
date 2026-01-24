@@ -121,9 +121,18 @@ def get_KV(
     K_cache = jnp.zeros((26, cache_size, 256), dtype=jnp.bfloat16)
     V_cache = jnp.zeros((26, cache_size, 256), dtype=jnp.bfloat16)
 
-    # TODO: Replace with jax.lax.scan!
-    for i, x in enumerate(prompt):
-        _, K_cache, V_cache = forward_single(x, params, i, K_cache, V_cache)
+    def forward_single_scanable(carry, scans):
+        Ks_cached, Vs_cached = carry
+        x, pos = scans
+
+        _, Ks_cached, Vs_cached = forward_single(x, params, pos, Ks_cached, Vs_cached)
+
+        return (Ks_cached, Vs_cached), None
+
+    pos = jnp.arange(0, n)
+    (K_cache, V_cache), _ = jax.lax.scan(
+        forward_single_scanable, (K_cache, V_cache), (prompt, pos)
+    )
 
     return K_cache, V_cache
 
