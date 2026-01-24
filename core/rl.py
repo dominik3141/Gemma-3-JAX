@@ -53,7 +53,7 @@ def sample_with_temp(
 
     # allocate array for sampled tokens
     xs = jnp.zeros_like(x, shape=(sample_length), dtype=jnp.int32)
-    log_probs = jnp.zeros_like(x, shape=(sample_length))
+    log_probs = jnp.zeros((sample_length))
 
     for i in range(sample_length):
         logits, K_cache, V_cache = forward_single(x, params, pos, K_cache, V_cache)
@@ -195,3 +195,6 @@ print(xs)
 print(xs.shape)
 
 print(detokenize_ids(xs.tolist()))
+print(log_probs)
+print(f"Probabilities per transition {jnp.exp(log_probs)}")
+print(f"Probability of output {jnp.exp(jnp.sum(log_probs))}")
