@@ -45,16 +45,16 @@ def Block_KV_cached(inits, scans) -> jax.Array:
 
     # Calculate comm vectors for new token
     K_new, V_new, Qs = calc_qkv(x, block_params, pos, is_local_attn)
-    
+
     # Update fixed-size KV cache
     Ks = Ks_cached.at[pos].set(K_new)
     Vs = Vs_cached.at[pos].set(V_new)
 
     # COMMUNICATION WITH OTHER TOKENS
     # first we go one level down to parallelize over the four Qs
-    Qs = jnp.expand_dims(Qs, axis=0)   # (1, 4, 256)
+    Qs = jnp.expand_dims(Qs, axis=0)  # (1, 4, 256)
     Qs = jnp.transpose(Qs, (1, 0, 2))  # (4, 1, 256) - head dimension should be first
-    
+
     pos_array = jnp.expand_dims(pos, axis=0)
     x = jax.vmap(attnHead, in_axes=(None, None, 0, None, None))(
         Ks, Vs, Qs, pos_array, is_local_attn
