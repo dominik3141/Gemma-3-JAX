@@ -110,7 +110,7 @@ def AttnScores(
     d_k = Q_a.shape[0]
 
     scores = (Q_a @ jnp.transpose(Ks)) / jnp.sqrt(d_k)
-    
+
     # causal masking
     scores = jnp.where(seq_indices <= idx_a, scores, -jnp.inf)
 
