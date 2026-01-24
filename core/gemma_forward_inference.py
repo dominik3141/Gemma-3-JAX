@@ -57,8 +57,9 @@ def Block_KV_cached(inits, scans) -> jax.Array:
     # COMMUNICATION WITH OTHER TOKENS
     # first we go one level down to parallelize over the four Qs
     Qs = jnp.transpose(Qs, (1, 0, 2))  # head dimension should be first
+    pos_array = jnp.expand_dims(pos, axis=0)
     x = jax.vmap(attnHead, in_axes=(None, None, 0, None, None))(
-        Ks, Vs, Qs, pos, is_local_attn
+        Ks, Vs, Qs, pos_array, is_local_attn
     )
     x = jnp.reshape(x, (4 * 256))  # concat heads and remove sequence dim
 
@@ -84,7 +85,7 @@ def forward_single(
     x = jnp.sqrt(1152) * x
 
     # single position should be wrapped in array to not confuse later vmaps
-    pos = jnp.expand_dims(jnp.array(pos), axis=0)
+    pos = jnp.array(pos)
 
     # BLOCKS
     # Create the pattern list based on the config
@@ -105,7 +106,7 @@ def forward_single(
     # map to logits
     x = params["model.embed_tokens.weight"] @ x
 
-    return x
+    return x, Ks_cached, Vs_cached
 
 
 def main() -> None:
@@ -127,8 +128,12 @@ def main() -> None:
     num_layers = 26
     seq_len = 10
     head_dim = 256
-    Ks_cached = jax.random.normal(key, (num_layers, seq_len, head_dim)).astype(jnp.bfloat16)
-    Vs_cached = jax.random.normal(key, (num_layers, seq_len, head_dim)).astype(jnp.bfloat16)
+    Ks_cached = jax.random.normal(key, (num_layers, seq_len, head_dim)).astype(
+        jnp.bfloat16
+    )
+    Vs_cached = jax.random.normal(key, (num_layers, seq_len, head_dim)).astype(
+        jnp.bfloat16
+    )
 
     # Position in sequence
     pos = seq_len
