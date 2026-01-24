@@ -108,6 +108,26 @@ def forward_single(
     return x, Ks_cached, Vs_cached
 
 
+def get_KV(
+    prompt: jax.Array, params: Params, cache_size: int
+) -> tuple[jax.Array, jax.Array]:
+    """
+    Given a tokenized prompt, return the prefilled KV cache.
+    """
+    n = prompt.shape[0]  # prompt should have shape (seq_len)
+
+    assert cache_size >= n
+
+    K_cache = jnp.zeros((26, cache_size, 256), dtype=jnp.bfloat16)
+    V_cache = jnp.zeros((26, cache_size, 256), dtype=jnp.bfloat16)
+
+    # TODO: Replace with jax.lax.scan!
+    for i, x in enumerate(prompt):
+        _, K_cache, V_cache = forward_single(x, params, i, K_cache, V_cache)
+
+    return K_cache, V_cache
+
+
 def main() -> None:
     """Test function for forward_single with actual generation."""
     from utils.inspect_weights import load_weights_as_dict

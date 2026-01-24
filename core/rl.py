@@ -26,54 +26,47 @@ MAX_RESPONSE_LENGTH = 1024
 import jax
 import jax.numpy as jnp
 from core.gemma_forward import Params
-from core.gemma_forward_inference import forward_single
+from core.gemma_forward_inference import forward_single, get_KV
 from utils.inspect_weights import load_weights_as_dict
-from utils.tokenize import tokenize_text
+from utils.tokenize import detokenize_ids, tokenize_text
 
 
 def sample_with_temp(
-    key: jax.random.PRNGKey, xs: jax.Array, temperature: float, params: Params
-) -> jax.Array:
+    key: jax.random.PRNGKey,
+    params: Params,
+    final_prompt_token: jax.Array,
+    pos: int,  # position of the last prompt token <=> length of prompt
+    K_cache: jax.Array,
+    V_cache: jax.Array,
+    temperature: float,
+    sample_length: int,
+) -> tuple[jax.Array, jax.Array]:
     """
-    Only here to provide a function with the right signature for now, will later on be relocated
-    to our new inference optimized forward function.
-
-    This function should sample according to a given temperature for a fixed length.
-    We return both the autoregressively completed sequence and the probability of the given trajectory at
+    Sample according to a given temperature for a fixed length.
+    We return both the autoregressively completed sequence and the probability of the trajectory at
     sampling time.
 
-    CURRENT PROBLEMS:
-        - no KV caching
+    For efficency, this function already takes the K,V cache of the prompt and only the last prompt token.
+    This way we can calculate the KV of the prompt only once and reuse this for every group element.
     """
+    x = final_prompt_token
 
-    def sampling_loop(init, carry) -> jax.Array:
-        key = init
-        xs, i = carry
+    # allocate array for sampled tokens
+    xs = jnp.zeros_like(x, shape=(sample_length), dtype=jnp.int32)
+    log_probs = jnp.zeros_like(x, shape=(sample_length))
 
-        next_token_logits = forward_single(xs, params, i)
+    for i in range(sample_length):
+        logits, K_cache, V_cache = forward_single(x, params, pos, K_cache, V_cache)
 
-        temp_next_token_logits = next_token_logits / temperature
-        next_token = jax.random.categorical(key, temp_next_token_logits)
-        log_prob_of_next_token = temp_next_token_logits[
-            next_token
-        ] - jax.scipy.special.logsumexp(temp_next_token_logits)
+        # sample next token
+        x = jnp.argmax(logits)  # TODO: Sample with temperature!
+        prop_of_next_token = jnp.log(logits[x])
 
-        xs = xs.at(i).set(next_token)
+        # save sampled token and probability
+        xs = xs.at[i].set(x)
+        log_probs = log_probs.at[i].set(prop_of_next_token)
 
-        return (xs, i + 1), log_prob_of_next_token
-
-    # padding
-    input_length = xs.shape[0]  # length of our prompt
-    padding_tokens = max(0, MAX_RESPONSE_LENGTH - input_length)
-    xs = jnp.concatenate([xs, jnp.zeros_like(xs, shape=(padding_tokens,))])
-
-    # forward scan
-    key, *keys = jax.random.split(key, MAX_RESPONSE_LENGTH - input_length + 1)
-    (xs, _), next_token_log_probs = jax.lax.scan(
-        sampling_loop, (xs, input_length), jnp.array(keys)
-    )
-
-    return xs, next_token_log_probs
+    return xs, log_probs
 
 
 def get_prompt(n: int) -> jax.Array:
@@ -160,6 +153,10 @@ def KL() -> jax.Array:
 def get_group(key: jax.random.PRNGKey, group_size: int, params: Params) -> jax.Array:
     """
     Samples a group of responses.
+
+    TODO:
+        -   We should make sure to only once per group calculate the KV cache for the prompt
+            that can save us a little compute.
     """
     key, subkey = jax.random.split(key)
     int_to_radicate = jax.random.randint(subkey, 1, MIN_ROOT, MAX_ROOT)
@@ -177,5 +174,18 @@ def get_group(key: jax.random.PRNGKey, group_size: int, params: Params) -> jax.A
 
 key = jax.random.PRNGKey(42)
 params = load_weights_as_dict("data/model_stacked_pt.safetensors")
-grp = get_group(key, 16, params)
-print(grp)
+
+prompt = get_prompt(42)
+
+# get KV cache for the prompt
+K_cache, V_cache = get_KV(prompt, params, MAX_RESPONSE_LENGTH)
+print(K_cache.shape)
+
+xs, log_probs = sample_with_temp(
+    key, params, prompt[-1], len(prompt), K_cache, V_cache, 1, 15
+)
+
+print(xs)
+print(xs.shape)
+
+print(detokenize_ids(xs.tolist()))
