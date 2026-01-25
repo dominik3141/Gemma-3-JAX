@@ -33,6 +33,7 @@ from utils.inspect_weights import load_weights_as_dict
 from utils.tokenize import tokenize_text, detokenize_ids
 
 
+@jax.jit
 def sample_with_temp(
     key: jax.random.PRNGKey,
     params: Params,
@@ -88,7 +89,7 @@ User: Calculate the square root of {n} up to three decimal places. Assistant:"""
     return jnp.array(tokenize_text(prompt))
 
 
-def reward(output_tokens: list[int], int_to_radicate: int) -> float:
+def reward_fn(output_tokens: list[int], int_to_radicate: int) -> float:
     r"""
     Calculate a reward (both for correctness and for existence of thinking tags)
     given the models output.
@@ -154,7 +155,13 @@ def objective_function() -> jax.Array:
     pass
 
 
-def simplified_objective_function() -> jax.Array:
+def simplified_objective_function(
+    params: Params,
+    group: jax.Array,
+    int_to_radicate: int,
+    prompt: jax.Array,
+    theta_old_log_probs: jax.Array,
+) -> jax.Array:
     r"""
     For testing before some of the KL stuff is ready.
 
@@ -163,10 +170,25 @@ def simplified_objective_function() -> jax.Array:
             \rho_i * A_i
         )
     """
-    pass
+    rewards = jax.vmap(reward_fn, in_axes=(0, None))(
+        group, int_to_radicate
+    )  # shape [n,], where n is group size
+
+    # calculate trajectory probabilites under current parameters
+    theta_log_probs = jax.vmap(
+        params, prop_of_trajectory, prompt, in_axes=(None, 0, 0)
+    )(group)
+
+    # calculate advantage (needs full group)
+    advantage = advantage_fn(rewards)
+
+    # calculate ratio
+    ratios = jax.vmap(ratio_fn)(theta_log_probs, theta_old_log_probs)
+
+    return jnp.sum(ratios * advantage)
 
 
-def advantage(r_t: jax.Array) -> jax.Array:
+def advantage_fn(rewards: jax.Array) -> jax.Array:
     r"""
     Defined as
         A_i = (r_i - mean({r_1, ..., r_G})) / std({r_1, ..., r_G})
@@ -175,23 +197,27 @@ def advantage(r_t: jax.Array) -> jax.Array:
 
     Needs global information from the whole group.
     """
-    mean = jnp.mean(r_t)
-    std = jnp.std(r_t)
+    mean = jnp.mean(rewards)
+    std = jnp.std(rewards)
 
-    return (r_t - mean) / (std + 1e-8)
+    return (rewards - mean) / (std + 1e-8)
 
 
-def ratio() -> jax.Array:
+def ratio_fn(theta_log_probs: jax.Array, theta_old_log_probs: jax.Array) -> jax.Array:
     r"""
     The good old PPO ratio defined as
         \rho_i(\theta) = ( \pi_\theta (o_i | q) ) / ( \pi_{\theta_old} (o_i | q))
 
     Local to a specific group element (so we vmap over the group).
     """
-    pass
+    ratios = jax.vmap(lambda new_probs, old_probs: new_probs / old_probs)(
+        theta_log_probs, theta_old_log_probs
+    )  # one ratio for each step in the trajectory
+
+    return jnp.prod(ratios)
 
 
-def prop_of_trajectory():
+def prop_of_trajectory(params: Params, trajectory: jax.Array, prompt: jax.Array):
     r"""
     The probability of a given trajectory o_i is defined as the (conditional) probability
     of every token, so
@@ -200,6 +226,8 @@ def prop_of_trajectory():
     The calculation of this probability must be differentiable.
     For this we can use the forward function that we originally had build for pretraining as we
     need to calculate the (probability of a) next token for a sequence with ground truth.
+
+    Important: Make sure to set the probability of the prompt tokens to 1!
     """
     pass
 
@@ -213,7 +241,7 @@ def KL() -> jax.Array:
 
 def get_group(
     key: jax.random.PRNGKey, group_size: int, params: Params
-) -> tuple[jax.Array, jax.Array]:
+) -> tuple[jax.Array, jax.Array, jax.Array, jax.Array]:
     """
     Samples a group of responses.
     """
@@ -240,14 +268,23 @@ def get_group(
         )
     )(group_keys)
 
-    return responses, log_probs  # doesn't contain values for prompt
+    return (
+        responses,
+        log_probs,
+        int_to_radicate,
+        prompt,
+    )
+
+
+def train_loop(key: jax.random.PRNGKey, params: Params):
+    # sample a group
+    grp, theta_old_log_probs, int_to_radicate, prompt = get_group(key, 8, params)
+
+    # put into objective function
+    val, grads = jax.value_and_grad(simplified_objective_function)(
+        params, grp, int_to_radicate, prompt, theta_old_log_probs
+    )
 
 
 key = jax.random.PRNGKey(42)
 params = load_weights_as_dict("data/model_stacked_pt.safetensors")
-
-grp, log_probs = get_group(key, 8, params)
-
-for i, response_tokens in enumerate(grp):
-    text = detokenize_ids(response_tokens.tolist())
-    print(f"Response {i}:\n{text}\n{'-' * 20}")
