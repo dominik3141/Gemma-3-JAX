@@ -197,10 +197,6 @@ def get_group(
 ) -> tuple[jax.Array, jax.Array]:
     """
     Samples a group of responses.
-
-    TODO:
-        -   We should make sure to only once per group calculate the KV cache for the prompt
-            that can save us a little compute.
     """
     key, subkey = jax.random.split(key)
     int_to_radicate = jax.random.randint(subkey, 1, MIN_ROOT, MAX_ROOT)
