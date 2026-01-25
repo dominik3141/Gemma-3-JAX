@@ -206,15 +206,17 @@ def advantage_fn(rewards: jax.Array) -> jax.Array:
 def ratio_fn(theta_log_probs: jax.Array, theta_old_log_probs: jax.Array) -> jax.Array:
     r"""
     The good old PPO ratio defined as
-        \rho_i(\theta) = ( \pi_\theta (o_i | q) ) / ( \pi_{\theta_old} (o_i | q))
+        \rho_i(\theta) = ( \pi_\theta (o_i | q) ) / ( \pi_{\theta_old} (o_i | q)) ,
+    where i is a group element and not a single trajectory step.
+    The paper is quite vocal about calculating the ratios per trajectory and not per token (as
+    PPO would do).
 
     Local to a specific group element (so we vmap over the group).
     """
-    ratios = jax.vmap(lambda new_probs, old_probs: new_probs / old_probs)(
-        theta_log_probs, theta_old_log_probs
-    )  # one ratio for each step in the trajectory
+    theta_traj_log_prob = jnp.sum(theta_log_probs)
+    theta_old_traj_log_probs = jnp.sum(theta_old_log_probs)
 
-    return jnp.prod(ratios)
+    return jnp.exp(theta_traj_log_prob - theta_old_traj_log_probs)
 
 
 def log_prop_of_trajectory(params: Params, trajectory: jax.Array, prompt: jax.Array):
