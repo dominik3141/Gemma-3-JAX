@@ -48,7 +48,7 @@ def sample_with_temp(
     We return both the autoregressively completed sequence and the probability of the trajectory at
     sampling time.
 
-    For efficency, this function already takes the K,V cache of the prompt and only the last prompt token.
+    For efficiency, this function already takes the K,V cache of the prompt and only the last prompt token.
     This way we can calculate the KV of the prompt only once and reuse this for every group element.
     """
 
@@ -99,7 +99,8 @@ def reward(output_tokens: list[int], int_to_radicate: int) -> float:
     text = detokenize_ids(output_tokens)
 
     # Tuning Parameters
-    FORMAT_WEIGHT = 0.1
+    # same coefficients for format and correctness according to R1 paper (p.4)
+    FORMAT_WEIGHT = 1.0
     CORRECTNESS_WEIGHT = 1.0
 
     # Initialize scores
@@ -137,16 +138,30 @@ def objective_function() -> jax.Array:
 
     Let G = {o_1,..., o_n} be a set (called group) of outputs for a given prompt q.
     The objective function is given by
-        J(\theta) = E_{q \sim P(Q), {o_i}_{i=1}^G \sim \pi_{\theta_old}} \\
+        J(\theta) = E_{ q \sim P(Q), {o_i}_{i=1}^G \sim \pi_{\theta_old} } \\
             [
-                1/G \Sum_{i = 1}^G min
-                (
-                    r_i(\theta), A_i),
-                    clip(r_i(\theta), 1-\epsilon, 1+\epsilon )
-                ) A_i - \beta KL(\pi_\theta, \pi_{theta_old})
+                1/n \Sum_{i = 1}^n (
+                    min (
+                        \rho_i A_i,
+                        clip(\rho_i , 1-\epsilon, 1+\epsilon ) * A_i
+                    )
+                    - \beta KL(\pi_\theta, \pi_{ref})
+                )
             ]
 
     In order to make this a little more readable, we break it up into a couple of helper functions.
+    """
+    pass
+
+
+def simplified_objective_function() -> jax.Array:
+    r"""
+    For testing before some of the KL stuff is ready.
+
+    Here we define (with some handwavy notation)
+        J(\theta) = 1/n \Sum_{i=1}^n (
+            \rho_i * A_i
+        )
     """
     pass
 
@@ -169,7 +184,7 @@ def advantage(r_t: jax.Array) -> jax.Array:
 def ratio() -> jax.Array:
     r"""
     The good old PPO ratio defined as
-        r_i(\theta) = ( \pi_\theta (o_i | q) ) / ( \pi_{\theta_old} (o_i | q))
+        \rho_i(\theta) = ( \pi_\theta (o_i | q) ) / ( \pi_{\theta_old} (o_i | q))
 
     Local to a specific group element (so we vmap over the group).
     """
@@ -181,6 +196,10 @@ def prop_of_trajectory():
     The probability of a given trajectory o_i is defined as the (conditional) probability
     of every token, so
         \pi_\theta (o | q) = \prod_{t+1}^L \pi(o_t | q, t_{<t})
+
+    The calculation of this probability must be differentiable.
+    For this we can use the forward function that we originally had build for pretraining as we
+    need to calculate the (probability of a) next token for a sequence with ground truth.
     """
     pass
 
