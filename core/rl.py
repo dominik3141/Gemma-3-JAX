@@ -23,6 +23,8 @@ SAMPLE_TEMP = 1  # as suggested by R1 paper
 GROUP_SIZE = 16  # as suggested by R1 paper
 MAX_RESPONSE_LENGTH = 250
 
+import re
+import math
 import jax
 import jax.numpy as jnp
 from core.gemma_forward import Params
@@ -86,12 +88,47 @@ User: Calculate the square root of {n} up to three decimal places. Assistant:"""
     return jnp.array(tokenize_text(prompt))
 
 
-def reward(output_tokens) -> jax.Array:
+def reward(output_tokens: list[int], int_to_radicate: int) -> float:
     r"""
     Calculate a reward (both for correctness and for existence of thinking tags)
     given the models output.
+
+    Would be very nice if we could do this in pure JAX, but so far I have no idea how
+    one could practically do so.
     """
-    pass
+    text = detokenize_ids(output_tokens)
+
+    # Tuning Parameters
+    FORMAT_WEIGHT = 0.1
+    CORRECTNESS_WEIGHT = 1.0
+
+    # Initialize scores
+    format_score = 0.0
+    correctness_score = 0.0
+
+    # 1. Check Format
+    # We look for the specific structure: <think> ... </think> <answer> ... </answer>
+    match = re.search(r"<think>.*?</think>\s*<answer>(.*?)</answer>", text, re.DOTALL)
+
+    if match:
+        format_score = 1.0
+
+        # 2. Check Correctness (only possible if format is valid)
+        try:
+            prediction_str = match.group(1).strip()
+            prediction = float(prediction_str)
+            target = math.sqrt(int_to_radicate)
+
+            # Check if close enough
+            if abs(prediction - target) < 1e-3:
+                correctness_score = 1.0
+
+        except ValueError:
+            # The number inside <answer> wasn't a valid float
+            correctness_score = 0.0
+
+    # Combine
+    return (format_score * FORMAT_WEIGHT) + (correctness_score * CORRECTNESS_WEIGHT)
 
 
 def objective_function() -> jax.Array:
@@ -188,7 +225,7 @@ def get_group(
         )
     )(group_keys)
 
-    return responses, log_probs
+    return responses, log_probs  # doesn't contain values for prompt
 
 
 key = jax.random.PRNGKey(42)
