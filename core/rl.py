@@ -27,7 +27,7 @@ import re
 import math
 import jax
 import jax.numpy as jnp
-from core.gemma_forward import Params
+from core.gemma_forward import Params, forward
 from core.gemma_forward_inference import forward_single, get_KV
 from utils.inspect_weights import load_weights_as_dict
 from utils.tokenize import tokenize_text, detokenize_ids
@@ -176,7 +176,7 @@ def simplified_objective_function(
 
     # calculate trajectory probabilites under current parameters
     theta_log_probs = jax.vmap(
-        params, prop_of_trajectory, prompt, in_axes=(None, 0, 0)
+        params, log_prop_of_trajectory, prompt, in_axes=(None, 0, 0)
     )(group)
 
     # calculate advantage (needs full group)
@@ -217,7 +217,7 @@ def ratio_fn(theta_log_probs: jax.Array, theta_old_log_probs: jax.Array) -> jax.
     return jnp.prod(ratios)
 
 
-def prop_of_trajectory(params: Params, trajectory: jax.Array, prompt: jax.Array):
+def log_prop_of_trajectory(params: Params, trajectory: jax.Array, prompt: jax.Array):
     r"""
     The probability of a given trajectory o_i is defined as the (conditional) probability
     of every token, so
@@ -229,7 +229,26 @@ def prop_of_trajectory(params: Params, trajectory: jax.Array, prompt: jax.Array)
 
     Important: Make sure to set the probability of the prompt tokens to 1!
     """
-    pass
+    xs = jnp.concatenate([prompt, trajectory])
+
+    # get the logits for the full trajectory
+    logits = forward(xs, params)
+
+    # do the gather (expensive!)
+    # logits[:-1] predicts xs[1:]
+    log_probs = jax.nn.log_softmax(logits[:-1])
+    targets = jnp.expand_dims(xs[1:], axis=-1)  # shape (seq_len, 1)
+    log_probs_taken = jnp.take_along_axis(log_probs, targets, axis=-1).squeeze(-1)
+
+    # mask out the prompt
+    mask = jnp.arange(log_probs_taken.shape[0]) >= (
+        len(prompt) - 1
+    )  # [0,0,...,1,1,...]
+    log_probs_taken = jnp.where(
+        mask, log_probs_taken, 0.0
+    )  # set log prob 0 (so set prob 1) if prompt token
+
+    return jnp.sum(log_probs_taken)  # sum instead of product cause of logs
 
 
 def KL() -> jax.Array:
