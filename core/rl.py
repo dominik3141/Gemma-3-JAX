@@ -33,7 +33,6 @@ from utils.inspect_weights import load_weights_as_dict
 from utils.tokenize import tokenize_text, detokenize_ids
 
 
-@jax.jit
 def sample_with_temp(
     key: jax.random.PRNGKey,
     params: Params,
