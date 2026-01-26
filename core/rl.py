@@ -206,21 +206,19 @@ def objective_function() -> jax.Array:
 
 def mask_fn(
     log_probs: jax.Array, answer_end_pos: jax.Array, prompt_len: int
-) -> tuple[jax.Array, jax.Array]:
+) -> jax.Array:
     """
     Mask out prompt tokens as well as post answer tokens.
     """
     log_probs_len = log_probs.shape[0]
 
     prompt_mask = jnp.arange(log_probs_len) >= (prompt_len - 1)  # [0,0,...,1,1,...]
-    post_answer_mask = jnp.arange(log_probs_len) <= answer_end_pos
+    post_answer_mask = jnp.arange(log_probs_len) < (answer_end_pos - 1)
     mask = prompt_mask & post_answer_mask
 
-    masked_log_probs = jnp.where(
-        mask, log_probs, 0.0
-    )  # set log prob 0 (so set prob 1) if prompt token
+    masked_log_probs = jnp.where(mask, log_probs, 0.0)
 
-    return masked_log_probs, mask
+    return masked_log_probs
 
 
 def simplified_objective_function(
@@ -259,21 +257,25 @@ def simplified_objective_function(
     )
 
     # masking of both the prompt tokens and the post-answer tokens
-    theta_log_probs, mask = jax.vmap(mask_fn, in_axes=(0, 0, None))(
+    theta_log_probs = jax.vmap(mask_fn, in_axes=(0, 0, None))(
         theta_log_probs, end_of_answer_pos, prompt_len
     )
-    theta_old_log_probs, _ = jax.vmap(mask_fn, in_axes=(0, 0, None))(
+    theta_old_log_probs = jax.vmap(mask_fn, in_axes=(0, 0, None))(
         theta_old_log_probs, end_of_answer_pos, prompt_len
     )
+
+    # now we can reduce the log_probs to a single log_prob per trajectory
+    theta_traj_log_probs = jax.vmap(jnp.sum)(theta_log_probs)
+    theta_old_traj_log_probs = jax.vmap(jnp.sum)(theta_old_log_probs)
 
     # calculate advantage (needs full group)
     advantage = advantage_fn(rewards)
 
     # calculate ratio
-    ratios = jax.vmap(ratio_fn)(theta_log_probs, theta_old_log_probs)
+    ratios = jax.vmap(ratio_fn)(theta_traj_log_probs, theta_old_traj_log_probs)
 
     # masked advantage
-    J_theta = jnp.sum(ratios * advantage * mask) / jnp.maximum(jnp.sum(mask), 1.0)
+    J_theta = jnp.mean(advantage * ratios)
 
     return -J_theta
 
@@ -395,9 +397,3 @@ key = jax.random.PRNGKey(42)
 params = load_weights_as_dict("data/model_stacked_pt.safetensors")
 
 train_loop(key, params)
-
-"""
-TODO: - Fix bug where we also consider the probability of tokens after the answer token!
-        We might want to centralize the whole masking logic to it's own function, so we can
-        unify the masking of the prompt and the post-answer tokens
-"""
