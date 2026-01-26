@@ -250,11 +250,9 @@ def simplified_objective_function(
 
     # we add the prompt token probabilities to our sample time log probs
     # just so they have the same shape as the new log probs
-    theta_old_log_probs = (
-        jnp.concatenate(
-            [jnp.zeros((prompt_len - 1,)), theta_old_log_probs], axis=-1
-        )  # shape [group_size, traj_len]
-    )
+    theta_old_log_probs = jax.vmap(
+        lambda x: jnp.concatenate([jnp.zeros((prompt_len - 1,)), x])
+    )(theta_old_log_probs)
 
     # masking of both the prompt tokens and the post-answer tokens
     theta_log_probs = jax.vmap(mask_fn, in_axes=(0, 0, None))(
