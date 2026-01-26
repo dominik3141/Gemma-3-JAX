@@ -86,7 +86,7 @@ def get_prompt(n: int) -> jax.Array:
 The assistant first thinks about the reasoning process in the mind and then provides the user with the answer. The reasoning process and answer are enclosed within <think>...</think> and <answer>...</answer> tags, respectively, i.e., <think> reasoning process here </think> <answer> answer here </answer>.
 User: Calculate the square root of {n} up to three decimal places. Assistant:"""
 
-    return jnp.array(tokenize_text(prompt))
+    return jnp.concatenate([jnp.array([2]), jnp.array(tokenize_text(prompt))])
 
 
 def _impure_reward_fn(output_tokens: list[int], int_to_radicate: int) -> float:
@@ -97,7 +97,7 @@ def _impure_reward_fn(output_tokens: list[int], int_to_radicate: int) -> float:
     Would be very nice if we could do this in pure JAX, but so far I have no idea how
     one could practically do so.
     """
-    text = detokenize_ids(output_tokens)
+    text = detokenize_ids(output_tokens.tolist())
 
     # Tuning Parameters
     # same coefficients for format and correctness according to R1 paper (p.4)
@@ -194,7 +194,7 @@ def simplified_objective_function(
     # calculate ratio
     ratios = jax.vmap(ratio_fn)(theta_traj_log_probs, theta_old_traj_log_probs)
 
-    return -jnp.sum(ratios * advantage)
+    return -jnp.mean(ratios * advantage)
 
 
 def advantage_fn(rewards: jax.Array) -> jax.Array:
