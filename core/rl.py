@@ -103,30 +103,48 @@ def _impure_reward_fn(output_tokens: list[int], int_to_radicate: int) -> float:
     FORMAT_WEIGHT = 1.0
     CORRECTNESS_WEIGHT = 1.0
 
-    # Initialize scores
-    format_score = 0.0
+    # 1. Strict Tag Count Check
+    if (
+        text.count("<think>") != 1
+        or text.count("</think>") != 1
+        or text.count("<answer>") != 1
+        or text.count("</answer>") != 1
+    ):
+        return 0.0
+
+    # 2. Strict Format Check
+    # Must start with <think>, allow newlines in thinking, no newlines in answer.
+    # We ignore everything after the first </answer> by not anchoring to the end.
+    match = re.search(
+        r"^\s*<think>(.*?)</think>\s*<answer>(.*?)</answer>", text, re.DOTALL
+    )
+
+    if not match:
+        return 0.0
+
+    format_score = 1.0
     correctness_score = 0.0
 
-    # 1. Check Format
-    # We look for the specific structure: <think> ... </think> <answer> ... </answer>
-    match = re.search(r"<think>.*?</think>\s*<answer>(.*?)</answer>", text, re.DOTALL)
+    # 3. Content Validation
+    answer_raw = match.group(2)
 
-    if match:
-        format_score = 1.0
+    # Enforce no newlines in the raw answer content
+    if "\n" in answer_raw:
+        return 0.0
 
-        # 2. Check Correctness (only possible if format is valid)
-        try:
-            prediction_str = match.group(1).strip()
-            prediction = float(prediction_str)
-            target = math.sqrt(int_to_radicate)
+    prediction_str = answer_raw.strip()
 
-            # Check if close enough
-            if abs(prediction - target) < 1e-3:
-                correctness_score = 1.0
+    # 4. Correctness Check
+    try:
+        prediction = float(prediction_str)
+        target = math.sqrt(float(int_to_radicate))
 
-        except ValueError:
-            # The number inside <answer> wasn't a valid float
-            correctness_score = 0.0
+        # Check if close enough
+        if abs(prediction - target) < 1e-3:
+            correctness_score = 1.0
+
+    except ValueError:
+        correctness_score = 0.0
 
     # Combine
     return (format_score * FORMAT_WEIGHT) + (correctness_score * CORRECTNESS_WEIGHT)
