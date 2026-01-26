@@ -19,6 +19,7 @@ MIN_ROOT = 1000
 SAMPLE_TEMP = 1  # as suggested by R1 paper
 GROUP_SIZE = 16  # as suggested by R1 paper
 MAX_RESPONSE_LENGTH = 250
+EPSILON = 0.1
 
 import re
 import math
@@ -179,7 +180,13 @@ def reward_fn(
     )
 
 
-def objective_function() -> jax.Array:
+def objective_function(
+    params: Params,
+    group: jax.Array,
+    int_to_radicate: int,
+    prompt: jax.Array,
+    theta_old_log_probs: jax.Array,
+) -> jax.Array:
     r"""
     The GRPO objective function that we can then differentiate with respect to the policy parameters \theta.
 
@@ -197,41 +204,6 @@ def objective_function() -> jax.Array:
             ]
 
     In order to make this a little more readable, we break it up into a couple of helper functions.
-    """
-    pass
-
-
-def mask_fn(
-    log_probs: jax.Array, answer_end_pos: jax.Array, prompt_len: int
-) -> jax.Array:
-    """
-    Mask out prompt tokens as well as post answer tokens.
-    """
-    log_probs_len = log_probs.shape[0]
-
-    prompt_mask = jnp.arange(log_probs_len) >= (prompt_len - 1)  # [0,0,...,1,1,...]
-    post_answer_mask = jnp.arange(log_probs_len) < (answer_end_pos - 1)
-    mask = prompt_mask & post_answer_mask
-
-    masked_log_probs = jnp.where(mask, log_probs, 0.0)
-
-    return masked_log_probs
-
-
-def simplified_objective_function(
-    params: Params,
-    group: jax.Array,
-    int_to_radicate: int,
-    prompt: jax.Array,
-    theta_old_log_probs: jax.Array,
-) -> jax.Array:
-    r"""
-    For testing before some of the KL stuff is ready.
-
-    Here we define (with some handwavy notation)
-        J(\theta) = 1/n \Sum_{i=1}^n (
-            \rho_i * A_i
-        )
     """
     prompt_len = prompt.shape[0]
 
@@ -269,10 +241,33 @@ def simplified_objective_function(
     # calculate ratio
     ratios = jax.vmap(ratio_fn)(theta_traj_log_probs, theta_old_traj_log_probs)
 
-    # masked advantage
-    J_theta = jnp.mean(advantage * ratios)
+    # clipped objective
+    # min(rho * A, clip(rho, 1-eps, 1+eps) * A)
+    unclipped = ratios * advantage
+    clipped = jnp.clip(ratios, 1.0 - EPSILON, 1.0 + EPSILON) * advantage
+
+    # We take the minimum of the two
+    # J_theta = mean(min(unclipped, clipped))
+    J_theta = jnp.mean(jnp.minimum(unclipped, clipped))
 
     return -J_theta
+
+
+def mask_fn(
+    log_probs: jax.Array, answer_end_pos: jax.Array, prompt_len: int
+) -> jax.Array:
+    """
+    Mask out prompt tokens as well as post answer tokens.
+    """
+    log_probs_len = log_probs.shape[0]
+
+    prompt_mask = jnp.arange(log_probs_len) >= (prompt_len - 1)  # [0,0,...,1,1,...]
+    post_answer_mask = jnp.arange(log_probs_len) < (answer_end_pos - 1)
+    mask = prompt_mask & post_answer_mask
+
+    masked_log_probs = jnp.where(mask, log_probs, 0.0)
+
+    return masked_log_probs
 
 
 def advantage_fn(rewards: jax.Array) -> jax.Array:
@@ -381,7 +376,7 @@ def train_loop(key: jax.random.PRNGKey, params: Params):
     grp, theta_old_log_probs, int_to_radicate, prompt = get_group(key, 8, params)
 
     # put into objective function
-    val, grads = jax.value_and_grad(simplified_objective_function)(
+    val, grads = jax.value_and_grad(objective_function)(
         params, grp, int_to_radicate, prompt, theta_old_log_probs
     )
 
