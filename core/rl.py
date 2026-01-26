@@ -67,7 +67,7 @@ def sample_with_temp(
 
         return (x, K_cache, V_cache), (x, log_prop_of_next_token)
 
-    poss = jnp.arange(pos, pos + sample_length)
+    poss = jnp.arange(sample_length) + pos  # [pos+0, pos+1,...,pos+same_length]
     keys = jax.random.split(key, sample_length)
     _, (xs, log_probs) = jax.lax.scan(
         sample_loop, (final_prompt_token, K_cache, V_cache), (poss, keys)
@@ -134,7 +134,11 @@ def _impure_reward_fn(output_tokens: list[int], int_to_radicate: int) -> float:
 
 def reward_fn(output_tokens: list[int], int_to_radicate: int) -> float:
     return jax.pure_callback(
-        _impure_reward_fn, jnp.float32, output_tokens, int_to_radicate
+        _impure_reward_fn,
+        jax.ShapeDtypeStruct((), jnp.float32),
+        output_tokens,
+        int_to_radicate,
+        vmap_method="sequential",
     )
 
 
@@ -274,7 +278,7 @@ def get_group(
     Samples a group of responses.
     """
     key, subkey = jax.random.split(key)
-    int_to_radicate = jax.random.randint(subkey, 1, MIN_ROOT, MAX_ROOT)
+    int_to_radicate = jax.random.randint(subkey, (), MIN_ROOT, MAX_ROOT)
 
     prompt = get_prompt(int_to_radicate)  # prompt is the same for the whole group
 
@@ -313,6 +317,10 @@ def train_loop(key: jax.random.PRNGKey, params: Params):
         params, grp, int_to_radicate, prompt, theta_old_log_probs
     )
 
+    print(grads)
+
 
 key = jax.random.PRNGKey(42)
 params = load_weights_as_dict("data/model_stacked_pt.safetensors")
+
+train_loop(key, params)
