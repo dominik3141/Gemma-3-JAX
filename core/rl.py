@@ -88,14 +88,20 @@ User: Calculate the square root of {n} up to three decimal places. Assistant:"""
     return jnp.concatenate([jnp.array([2]), jnp.array(tokenize_text(prompt))])
 
 
-def _impure_reward_fn(output_tokens: list[int], int_to_radicate: int) -> float:
+def _impure_reward_fn(
+    output_tokens: jax.Array, int_to_radicate: int
+) -> tuple[float, int]:
     r"""
     Calculate a reward (both for correctness and for existence of thinking tags)
     given the models output.
 
     Would be very nice if we could do this in pure JAX, but so far I have no idea how
     one could practically do so.
+
+    The code in this function is AI maintained and not exactly beautiful.
     """
+    # default end position is the end of the sequence
+    end_pos = len(output_tokens)
     text = detokenize_ids(output_tokens.tolist())
 
     # Tuning Parameters
@@ -110,7 +116,7 @@ def _impure_reward_fn(output_tokens: list[int], int_to_radicate: int) -> float:
         or text.count("<answer>") != 1
         or text.count("</answer>") != 1
     ):
-        return 0.0
+        return 0.0, end_pos
 
     # 2. Strict Format Check
     # Must start with <think>, allow newlines in thinking, no newlines in answer.
@@ -120,7 +126,17 @@ def _impure_reward_fn(output_tokens: list[int], int_to_radicate: int) -> float:
     )
 
     if not match:
-        return 0.0
+        return 0.0, end_pos
+
+    # find the end position in tokens
+    tokens = output_tokens.tolist()
+    # We search for the sequence </answer>.
+    # From our tests, answer> is [14433, 236813] and </ is 954 or 1454 (with space).
+    for i in range(len(tokens) - 1):
+        if tokens[i : i + 2] == [14433, 236813]:
+            if i > 0 and tokens[i - 1] in [954, 1454]:
+                end_pos = i + 2
+                break
 
     format_score = 1.0
     correctness_score = 0.0
@@ -130,7 +146,7 @@ def _impure_reward_fn(output_tokens: list[int], int_to_radicate: int) -> float:
 
     # Enforce no newlines in the raw answer content
     if "\n" in answer_raw:
-        return 0.0
+        return 0.0, end_pos
 
     prediction_str = answer_raw.strip()
 
@@ -147,13 +163,19 @@ def _impure_reward_fn(output_tokens: list[int], int_to_radicate: int) -> float:
         correctness_score = 0.0
 
     # Combine
-    return (format_score * FORMAT_WEIGHT) + (correctness_score * CORRECTNESS_WEIGHT)
+    reward = (format_score * FORMAT_WEIGHT) + (correctness_score * CORRECTNESS_WEIGHT)
+    return float(reward), int(end_pos)
 
 
-def reward_fn(output_tokens: list[int], int_to_radicate: int) -> float:
+def reward_fn(
+    output_tokens: jax.Array, int_to_radicate: int
+) -> tuple[jax.Array, jax.Array]:
     return jax.pure_callback(
         _impure_reward_fn,
-        jax.ShapeDtypeStruct((), jnp.float32),
+        (
+            jax.ShapeDtypeStruct((), jnp.float32),
+            jax.ShapeDtypeStruct((), jnp.int32),
+        ),
         output_tokens,
         int_to_radicate,
         vmap_method="sequential",
@@ -182,6 +204,25 @@ def objective_function() -> jax.Array:
     pass
 
 
+def mask_fn(
+    log_probs: jax.Array, answer_end_pos: jax.Array, prompt_len: int
+) -> tuple[jax.Array, jax.Array]:
+    """
+    Mask out prompt tokens as well as post answer tokens.
+    """
+    log_probs_len = log_probs.shape[0]
+
+    prompt_mask = jnp.arange(log_probs_len) >= (prompt_len - 1)  # [0,0,...,1,1,...]
+    post_answer_mask = jnp.arange(log_probs_len) <= answer_end_pos
+    mask = prompt_mask & post_answer_mask
+
+    masked_log_probs = jnp.where(
+        mask, log_probs, 0.0
+    )  # set log prob 0 (so set prob 1) if prompt token
+
+    return masked_log_probs, mask
+
+
 def simplified_objective_function(
     params: Params,
     group: jax.Array,
@@ -197,25 +238,44 @@ def simplified_objective_function(
             \rho_i * A_i
         )
     """
-    rewards = jax.vmap(reward_fn, in_axes=(0, None))(
+    prompt_len = prompt.shape[0]
+
+    rewards, end_of_answer_pos_relative = jax.vmap(reward_fn, in_axes=(0, None))(
         group, int_to_radicate
     )  # shape [n,], where n is group size
+    end_of_answer_pos = prompt_len + end_of_answer_pos_relative
 
     # calculate trajectory probabilites under current parameters
-    theta_traj_log_probs = jax.vmap(log_prop_of_trajectory, in_axes=(None, 0, None))(
+    theta_log_probs = jax.vmap(log_prop_of_trajectory, in_axes=(None, 0, None))(
         params, group, prompt
+    )  # shape [group_size, traj_len]
+
+    # we add the prompt token probabilities to our sample time log probs
+    # just so they have the same shape as the new log probs
+    theta_old_log_probs = (
+        jnp.concatenate(
+            [jnp.zeros((prompt_len - 1,)), theta_old_log_probs], axis=-1
+        )  # shape [group_size, traj_len]
     )
-    theta_old_traj_log_probs = jnp.sum(
-        theta_old_log_probs, axis=-1
-    )  # need prob for whole trajectory, not per token
+
+    # masking of both the prompt tokens and the post-answer tokens
+    theta_log_probs, mask = jax.vmap(mask_fn, in_axes=(0, 0, None))(
+        theta_log_probs, end_of_answer_pos, prompt_len
+    )
+    theta_old_log_probs, _ = jax.vmap(mask_fn, in_axes=(0, 0, None))(
+        theta_old_log_probs, end_of_answer_pos, prompt_len
+    )
 
     # calculate advantage (needs full group)
     advantage = advantage_fn(rewards)
 
     # calculate ratio
-    ratios = jax.vmap(ratio_fn)(theta_traj_log_probs, theta_old_traj_log_probs)
+    ratios = jax.vmap(ratio_fn)(theta_log_probs, theta_old_log_probs)
 
-    return -jnp.mean(ratios * advantage)
+    # masked advantage
+    J_theta = jnp.sum(ratios * advantage * mask) / jnp.maximum(jnp.sum(mask), 1.0)
+
+    return -J_theta
 
 
 def advantage_fn(rewards: jax.Array) -> jax.Array:
@@ -257,8 +317,6 @@ def log_prop_of_trajectory(params: Params, trajectory: jax.Array, prompt: jax.Ar
     The calculation of this probability must be differentiable.
     For this we can use the forward function that we originally had build for pretraining as we
     need to calculate the (probability of a) next token for a sequence with ground truth.
-
-    Important: Make sure to set the probability of the prompt tokens to 1!
     """
     xs = jnp.concatenate([prompt, trajectory])
 
@@ -271,15 +329,10 @@ def log_prop_of_trajectory(params: Params, trajectory: jax.Array, prompt: jax.Ar
     targets = jnp.expand_dims(xs[1:], axis=-1)  # shape (seq_len, 1)
     log_probs_taken = jnp.take_along_axis(log_probs, targets, axis=-1).squeeze(-1)
 
-    # mask out the prompt
-    mask = jnp.arange(log_probs_taken.shape[0]) >= (
-        len(prompt) - 1
-    )  # [0,0,...,1,1,...]
-    log_probs_taken = jnp.where(
-        mask, log_probs_taken, 0.0
-    )  # set log prob 0 (so set prob 1) if prompt token
-
-    return jnp.sum(log_probs_taken)  # sum instead of product cause of logs
+    # we return the list of probabilities of every transition between tokens
+    # we have to make sure to later mask out the prompt tokens which should have
+    # probability 1
+    return log_probs_taken
 
 
 def KL() -> jax.Array:
@@ -342,3 +395,9 @@ key = jax.random.PRNGKey(42)
 params = load_weights_as_dict("data/model_stacked_pt.safetensors")
 
 train_loop(key, params)
+
+"""
+TODO: - Fix bug where we also consider the probability of tokens after the answer token!
+        We might want to centralize the whole masking logic to it's own function, so we can
+        unify the masking of the prompt and the post-answer tokens
+"""
