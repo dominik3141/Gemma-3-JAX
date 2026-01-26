@@ -182,7 +182,7 @@ def simplified_objective_function(
 
     # calculate trajectory probabilites under current parameters
     theta_log_probs = jax.vmap(
-        params, log_prop_of_trajectory, prompt, in_axes=(None, 0, 0)
+        params, log_prop_of_trajectory, prompt, in_axes=(None, 0, None)
     )(group)
 
     # calculate advantage (needs full group)
