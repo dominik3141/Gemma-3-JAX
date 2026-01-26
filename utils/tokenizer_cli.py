@@ -34,8 +34,8 @@ def main():
     parser.add_argument(
         "--model_path",
         type=str,
-        default="tokenizer.model",
-        help="Path to the tokenizer.model file (default: tokenizer.model)",
+        default="data/tokenizer.model",
+        help="Path to the tokenizer.model file (default: data/tokenizer.model)",
     )
     parser.add_argument(
         "--decode",
