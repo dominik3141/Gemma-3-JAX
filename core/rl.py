@@ -181,17 +181,20 @@ def simplified_objective_function(
     )  # shape [n,], where n is group size
 
     # calculate trajectory probabilites under current parameters
-    theta_log_probs = jax.vmap(
-        params, log_prop_of_trajectory, prompt, in_axes=(None, 0, None)
-    )(group)
+    theta_traj_log_probs = jax.vmap(log_prop_of_trajectory, in_axes=(None, 0, None))(
+        params, group, prompt
+    )
+    theta_old_traj_log_probs = jnp.sum(
+        theta_old_log_probs, axis=-1
+    )  # need prob for whole trajectory, not per token
 
     # calculate advantage (needs full group)
     advantage = advantage_fn(rewards)
 
     # calculate ratio
-    ratios = jax.vmap(ratio_fn)(theta_log_probs, theta_old_log_probs)
+    ratios = jax.vmap(ratio_fn)(theta_traj_log_probs, theta_old_traj_log_probs)
 
-    return jnp.sum(ratios * advantage)
+    return -jnp.sum(ratios * advantage)
 
 
 def advantage_fn(rewards: jax.Array) -> jax.Array:
@@ -209,7 +212,9 @@ def advantage_fn(rewards: jax.Array) -> jax.Array:
     return (rewards - mean) / (std + 1e-8)
 
 
-def ratio_fn(theta_log_probs: jax.Array, theta_old_log_probs: jax.Array) -> jax.Array:
+def ratio_fn(
+    theta_traj_log_prob: jax.Array, theta_old_traj_log_prob: jax.Array
+) -> jax.Array:
     r"""
     The good old PPO ratio defined as
         \rho_i(\theta) = ( \pi_\theta (o_i | q) ) / ( \pi_{\theta_old} (o_i | q)) ,
@@ -219,10 +224,7 @@ def ratio_fn(theta_log_probs: jax.Array, theta_old_log_probs: jax.Array) -> jax.
 
     Local to a specific group element (so we vmap over the group).
     """
-    theta_traj_log_prob = jnp.sum(theta_log_probs)
-    theta_old_traj_log_probs = jnp.sum(theta_old_log_probs)
-
-    return jnp.exp(theta_traj_log_prob - theta_old_traj_log_probs)
+    return jnp.exp(theta_traj_log_prob - theta_old_traj_log_prob)
 
 
 def log_prop_of_trajectory(params: Params, trajectory: jax.Array, prompt: jax.Array):
