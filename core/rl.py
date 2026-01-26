@@ -12,9 +12,6 @@ Plan:
 2.  Assign reward with baseline (GRPO)
 3.  Loss
 4.  Backpropagate
-
-Stuff to fix:
--   We need a forward function that is optimized for inference
 """
 
 MAX_ROOT = 90000000
