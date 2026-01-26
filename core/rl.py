@@ -89,7 +89,7 @@ User: Calculate the square root of {n} up to three decimal places. Assistant:"""
     return jnp.array(tokenize_text(prompt))
 
 
-def reward_fn(output_tokens: list[int], int_to_radicate: int) -> float:
+def _impure_reward_fn(output_tokens: list[int], int_to_radicate: int) -> float:
     r"""
     Calculate a reward (both for correctness and for existence of thinking tags)
     given the models output.
@@ -131,6 +131,12 @@ def reward_fn(output_tokens: list[int], int_to_radicate: int) -> float:
 
     # Combine
     return (format_score * FORMAT_WEIGHT) + (correctness_score * CORRECTNESS_WEIGHT)
+
+
+def reward_fn(output_tokens: list[int], int_to_radicate: int) -> float:
+    return jax.pure_callback(
+        _impure_reward_fn, jnp.float32, output_tokens, int_to_radicate
+    )
 
 
 def objective_function() -> jax.Array:
