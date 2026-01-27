@@ -20,6 +20,7 @@ SAMPLE_TEMP = 1  # as suggested by R1 paper
 GROUP_SIZE = 16  # as suggested by R1 paper
 MAX_RESPONSE_LENGTH = 250
 EPSILON = 0.1
+BETA = 0.04  # as suggested by R1 paper
 
 import re
 import math
@@ -186,6 +187,7 @@ def objective_function(
     int_to_radicate: int,
     prompt: jax.Array,
     theta_old_log_probs: jax.Array,
+    params_ref: Params,
 ) -> jax.Array:
     r"""
     The GRPO objective function that we can then differentiate with respect to the policy parameters \theta.
@@ -246,9 +248,13 @@ def objective_function(
     unclipped = ratios * advantage
     clipped = jnp.clip(ratios, 1.0 - EPSILON, 1.0 + EPSILON) * advantage
 
+    # KL penalty
+    kl_penalty = KL(params_ref, group, prompt, theta_log_probs, end_of_answer_pos)
+    kl_penalty = jnp.sum(kl_penalty, axis=-1)  # sum over sequence length
+
     # We take the minimum of the two
-    # J_theta = mean(min(unclipped, clipped))
-    J_theta = jnp.mean(jnp.minimum(unclipped, clipped))
+    # J_theta = mean(min(unclipped, clipped) - beta * KL)
+    J_theta = jnp.mean(jnp.minimum(unclipped, clipped) - BETA * kl_penalty)
 
     return -J_theta
 
@@ -327,11 +333,35 @@ def log_prop_of_trajectory(params: Params, trajectory: jax.Array, prompt: jax.Ar
     return log_probs_taken
 
 
-def KL() -> jax.Array:
+def KL(
+    params_ref: Params,
+    group: jax.Array,
+    prompt: jax.Array,
+    theta_log_probs: jax.Array,
+    end_of_answer_pos: jax.Array,
+) -> jax.Array:
     r"""
-    Calculates KL(\pi_\theta, \pi_{\theta_old}).
+    Calculates KL(\pi_{ref} || \pi_\theta) per token.
+
+    We use the approximation derived from f-divergence:
+        KL(p || q) \approx p/q - log(p/q) - 1
+    where p is \pi_{ref} and q is \pi_{\theta}.
     """
-    pass
+    prompt_len = prompt.shape[0]
+
+    # we need to calculate the log probs of the reference model
+    ref_log_probs = jax.vmap(log_prop_of_trajectory, in_axes=(None, 0, None))(
+        params_ref, group, prompt
+    )
+    # same masking as for theta_log_probs
+    ref_log_probs = jax.vmap(mask_fn, in_axes=(0, 0, None))(
+        ref_log_probs, end_of_answer_pos, prompt_len
+    )
+
+    log_ratio = ref_log_probs - theta_log_probs
+    ratio = jnp.exp(log_ratio)
+
+    return ratio - log_ratio - 1
 
 
 def get_group(
@@ -371,13 +401,13 @@ def get_group(
     )
 
 
-def train_loop(key: jax.random.PRNGKey, params: Params):
+def train_loop(key: jax.random.PRNGKey, params: Params, params_ref: Params):
     # sample a group
     grp, theta_old_log_probs, int_to_radicate, prompt = get_group(key, 8, params)
 
     # put into objective function
     val, grads = jax.value_and_grad(objective_function)(
-        params, grp, int_to_radicate, prompt, theta_old_log_probs
+        params, grp, int_to_radicate, prompt, theta_old_log_probs, params_ref
     )
 
     print(grads)
@@ -386,4 +416,4 @@ def train_loop(key: jax.random.PRNGKey, params: Params):
 key = jax.random.PRNGKey(42)
 params = load_weights_as_dict("data/model_stacked_pt.safetensors")
 
-train_loop(key, params)
+train_loop(key, params, params)
