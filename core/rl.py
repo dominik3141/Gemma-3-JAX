@@ -404,43 +404,45 @@ def get_group(
     )
 
 
+def train_inner_loop(
+    key: jax.random.PRNGKey, params: Params, params_ref: Params
+) -> tuple[jax.Array, jax.Array]:
+    # sample a group
+    grp, theta_old_log_probs, int_to_radicate, prompt = get_group(
+        key, GROUP_SIZE, params
+    )
+
+    # put into objective function
+    loss, grads = jax.value_and_grad(objective_function)(
+        params, grp, int_to_radicate, prompt, theta_old_log_probs, params_ref
+    )
+
+    return loss, grads
+
+
 def train_loop(
     key: jax.random.PRNGKey,
     params: Params,
     params_ref: Params,
     optimizer_state: optax.OptState,
 ) -> tuple[Params, jax.Array, optax.OptState]:
-    accumulated_grads = jax.tree_map(lambda x: jnp.zeros_like(x), params)
-
-    # TODO: Should be a jax.scan or a vmap
-    for _ in range(NUM_GROUPS_PER_UPDATE):
-        key = jax.random.split(key, 1)
-
-        # sample a group
-        grp, theta_old_log_probs, int_to_radicate, prompt = get_group(
-            key, GROUP_SIZE, params
-        )
-
-        # put into objective function
-        loss, grads = jax.value_and_grad(objective_function)(
-            params, grp, int_to_radicate, prompt, theta_old_log_probs, params_ref
-        )
-
-        # add grads to accumulated grads
-        accumulated_grads = jax.tree_map(lambda a, g: a + g, accumulated_grads, grads)
-
-    # divide grads by number of groups that contributed to it
-    accumulated_grads = jax.tree_map(
-        lambda g: g / NUM_GROUPS_PER_UPDATE, accumulated_grads
+    keys = jax.random.split(key, NUM_GROUPS_PER_UPDATE)
+    losses, grads = jax.vmap(
+        train_inner_loop, in_axes=(0, None, None)
+    )(  # might have to use jax.lax.map for sequential execution instead to prevent OOM
+        keys, params, params_ref
     )
 
+    # average the grads
+    accumulated_grads = jax.tree_map(lambda g: jnp.mean(g, axis=0), grads)
+
     # update parameters
-    grad_updates, new_optimizer_state = optax.adam(LEARNING_RATE)(
+    grad_updates, new_optimizer_state = optax.adam(LEARNING_RATE).update(
         accumulated_grads, optimizer_state, params
     )
     new_params = jax.tree_util.tree_map(lambda p, u: p + u, params, grad_updates)
 
-    return new_params, loss, new_optimizer_state
+    return new_params, jnp.mean(losses), new_optimizer_state
 
 
 def main():
