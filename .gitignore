@@ -32,3 +32,5 @@ dev_sync.tar.gz.env
 
 # profiles
 jax-trace/
+
+HLO_dumps/
