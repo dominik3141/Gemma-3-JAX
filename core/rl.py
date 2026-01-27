@@ -33,6 +33,7 @@ from core.gemma_forward import Params, forward
 from core.gemma_forward_inference import forward_single, get_KV
 from utils.inspect_weights import load_weights_as_dict
 from utils.tokenize import tokenize_text, detokenize_ids
+import functools
 
 
 def sample_with_temp(
@@ -428,11 +429,15 @@ def train_loop(
     optimizer_state: optax.OptState,
 ) -> tuple[Params, jax.Array, optax.OptState]:
     keys = jax.random.split(key, NUM_GROUPS_PER_UPDATE)
-    losses, grads = jax.vmap(
-        train_inner_loop, in_axes=(0, None, None)
-    )(  # might have to use jax.lax.map for sequential execution instead to prevent OOM
-        keys, params, params_ref
+    inner_loop_partial = functools.partial(
+        train_inner_loop, params=params, params_ref=params_ref
     )
+    # losses, grads = jax.vmap(
+    #     train_inner_loop, in_axes=(0, None, None)
+    # )(  # might have to use jax.lax.map for sequential execution instead to prevent OOM
+    #     keys, params, params_ref
+    # )
+    losses, grads = jax.lax.map(inner_loop_partial, keys)
 
     # average the grads
     accumulated_grads = jax.tree_util.tree_map(lambda g: jnp.mean(g, axis=0), grads)
@@ -453,6 +458,7 @@ def main():
     # initial adam state
     optimizer_state = optax.adam(LEARNING_RATE).init(params)
 
+    # TODO: Use actual copy of parameters for \pi_ref as soon as we have enough memory
     params, loss, optimizer_state = train_loop(key, params, params, optimizer_state)
 
     print(loss)
