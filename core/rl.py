@@ -20,12 +20,15 @@ SAMPLE_TEMP = 1  # as suggested by R1 paper
 GROUP_SIZE = 16  # as suggested by R1 paper
 MAX_RESPONSE_LENGTH = 250
 EPSILON = 0.1
-BETA = 0.04  # as suggested by R1 paper
+BETA = 0.001  # as suggested by R1 paper
+NUM_GROUPS_PER_UPDATE = 32  # as suggested by R1 paper
+LEARNING_RATE = 3e-6  # as suggested by R1 paper
 
 import re
 import math
 import jax
 import jax.numpy as jnp
+import optax
 from core.gemma_forward import Params, forward
 from core.gemma_forward_inference import forward_single, get_KV
 from utils.inspect_weights import load_weights_as_dict
@@ -401,19 +404,56 @@ def get_group(
     )
 
 
-def train_loop(key: jax.random.PRNGKey, params: Params, params_ref: Params):
-    # sample a group
-    grp, theta_old_log_probs, int_to_radicate, prompt = get_group(key, 8, params)
+def train_loop(
+    key: jax.random.PRNGKey,
+    params: Params,
+    params_ref: Params,
+    optimizer_state: optax.OptState,
+) -> tuple[Params, jax.Array, optax.OptState]:
+    accumulated_grads = jax.tree_map(lambda x: jnp.zeros_like(x), params)
 
-    # put into objective function
-    val, grads = jax.value_and_grad(objective_function)(
-        params, grp, int_to_radicate, prompt, theta_old_log_probs, params_ref
+    # TODO: Should be a jax.scan or a vmap
+    for _ in range(NUM_GROUPS_PER_UPDATE):
+        key = jax.random.split(key, 1)
+
+        # sample a group
+        grp, theta_old_log_probs, int_to_radicate, prompt = get_group(
+            key, GROUP_SIZE, params
+        )
+
+        # put into objective function
+        loss, grads = jax.value_and_grad(objective_function)(
+            params, grp, int_to_radicate, prompt, theta_old_log_probs, params_ref
+        )
+
+        # add grads to accumulated grads
+        accumulated_grads = jax.tree_map(lambda a, g: a + g, accumulated_grads, grads)
+
+    # divide grads by number of groups that contributed to it
+    accumulated_grads = jax.tree_map(
+        lambda g: g / NUM_GROUPS_PER_UPDATE, accumulated_grads
     )
 
-    print(grads)
+    # update parameters
+    grad_updates, new_optimizer_state = optax.adam(LEARNING_RATE)(
+        accumulated_grads, optimizer_state, params
+    )
+    new_params = jax.tree_util.tree_map(lambda p, u: p + u, params, grad_updates)
+
+    return new_params, loss, new_optimizer_state
 
 
-key = jax.random.PRNGKey(42)
-params = load_weights_as_dict("data/model_stacked_pt.safetensors")
+def main():
+    key = jax.random.PRNGKey(42)
+    params = load_weights_as_dict("data/model_stacked_pt.safetensors")
 
-train_loop(key, params, params)
+    # initial adam state
+    optimizer_state = optax.adam(LEARNING_RATE).init(params)
+
+    params, loss, optimizer_state = train_loop(key, params, params, optimizer_state)
+
+    print(loss)
+
+
+if __name__ == "__main__":
+    main()
