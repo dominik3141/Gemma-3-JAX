@@ -420,6 +420,7 @@ def train_inner_loop(
     return loss, grads
 
 
+@jax.jit
 def train_loop(
     key: jax.random.PRNGKey,
     params: Params,
@@ -434,7 +435,7 @@ def train_loop(
     )
 
     # average the grads
-    accumulated_grads = jax.tree_map(lambda g: jnp.mean(g, axis=0), grads)
+    accumulated_grads = jax.tree_util.tree_map(lambda g: jnp.mean(g, axis=0), grads)
 
     # update parameters
     grad_updates, new_optimizer_state = optax.adam(LEARNING_RATE).update(
