@@ -17,12 +17,14 @@ Plan:
 MAX_ROOT = 90000000
 MIN_ROOT = 1000
 SAMPLE_TEMP = 1  # as suggested by R1 paper
-GROUP_SIZE = 16  # as suggested by R1 paper
+GROUP_SIZE = 8  # as suggested by R1 paper
 MAX_RESPONSE_LENGTH = 250
 EPSILON = 0.1
 BETA = 0.001  # as suggested by R1 paper
 NUM_GROUPS_PER_UPDATE = 32  # as suggested by R1 paper
-LEARNING_RATE = 3e-6  # as suggested by R1 paper
+LEARNING_RATE = (
+    (GROUP_SIZE / 16) * (NUM_GROUPS_PER_UPDATE / 32) * 3e-6
+)  # as suggested by R1 paper
 
 import re
 import math
@@ -496,17 +498,22 @@ def train_loop(
     inner_loop_partial = functools.partial(
         train_inner_loop, params=params, params_ref=params_ref
     )
-    # losses, grads = jax.vmap(
-    #     train_inner_loop, in_axes=(0, None, None)
-    # )(  # might have to use jax.lax.map for sequential execution instead to prevent OOM
-    #     keys, params, params_ref
-    # )
-    losses, format_scores, correctness_scores, grads = jax.lax.map(
-        inner_loop_partial, keys
+    # Use scan to accumulate gradients sequentially to save memory
+    grads_accum = jax.tree_util.tree_map(jnp.zeros_like, params)
+
+    def scan_body(accum, key):
+        loss, fmt, cor, grads = inner_loop_partial(key)
+        new_accum = jax.tree_util.tree_map(jnp.add, accum, grads)
+        return new_accum, (loss, fmt, cor)
+
+    accumulated_grads, (losses, format_scores, correctness_scores) = jax.lax.scan(
+        scan_body, grads_accum, keys
     )
 
-    # average the grads
-    accumulated_grads = jax.tree_util.tree_map(lambda g: jnp.mean(g, axis=0), grads)
+    # Average the grads
+    accumulated_grads = jax.tree_util.tree_map(
+        lambda g: g / NUM_GROUPS_PER_UPDATE, accumulated_grads
+    )
 
     # update parameters
     grad_updates, new_optimizer_state = optax.adam(LEARNING_RATE).update(
@@ -537,7 +544,7 @@ def main():
     i = 0
     while True:
         params, loss, format_pct, correct_pct, optimizer_state = train_loop(
-            key, params, params_ref, optimizer_state
+            key, params, params, optimizer_state
         )
         key, _ = jax.random.split(key)
         print(
