@@ -456,7 +456,7 @@ def get_group(
             len(prompt) - 1,
             K_cache,
             V_cache,
-            1,
+            SAMPLE_TEMP,
             MAX_RESPONSE_LENGTH - len(prompt),
         )
     )(group_keys)
