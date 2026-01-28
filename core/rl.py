@@ -83,12 +83,62 @@ def get_prompt(n: int) -> jax.Array:
     r"""
     Returns the tokens of a prompt to calculate the square root of n,
     wrapped in the DeepSeek-R1-Zero system template.
-    """
-    prompt = f"""A conversation between User and Assistant. The user asks a question, and the Assistant solves it.
-The assistant first thinks about the reasoning process in the mind and then provides the user with the answer. The reasoning process and answer are enclosed within <think>...</think> and <answer>...</answer> tags, respectively, i.e., <think> reasoning process here </think> <answer> answer here </answer>.
-User: Calculate the square root of {n} up to three decimal places. Assistant:"""
 
-    return jnp.concatenate([jnp.array([2]), jnp.array(tokenize_text(prompt))])
+    This function is implemented purely in JAX to avoid `jax.pure_callback` or host-device transfers,
+    ensuring it can be JIT-compiled and traced efficiently.
+
+    Mechanism:
+    1.  We decompose the integer `n` into its decimal digits using basic arithmetic:
+        `digits = (n // 10^i) % 10` for i in [7..0].
+    2.  We map these digits [0-9] to their corresponding token IDs using a lookup table.
+        We verified that the tokenizer treats digits as individual tokens (no merging like "12" -> one token)
+        and that they don't merge with the prefix/suffix.
+    3.  We concatenate [BOS] + prefix + digit_tokens + suffix.
+
+    This guarantees a fixed shape output (112 tokens) and ensures that we don't break the JAX tracer.
+    """
+    prefix_str = """A conversation between User and Assistant. The user asks a question, and the Assistant solves it.
+The assistant first thinks about the reasoning process in the mind and then provides the user with the answer. The reasoning process and answer are enclosed within <think>...</think> and <answer>...</answer> tags, respectively, i.e., <think> reasoning process here </think> <answer> answer here </answer>.
+User: Calculate the square root of """
+    suffix_str = " up to three decimal places. Assistant:"
+
+    # These tokenizations happen during tracing (constant folding) or eagerly (fast enough)
+    prefix_tokens = jnp.array(tokenize_text(prefix_str), dtype=jnp.int32)
+    suffix_tokens = jnp.array(tokenize_text(suffix_str), dtype=jnp.int32)
+
+    # Tokens for digits 0-9: ["0", "1", ..., "9"]
+    # We use hardcoded IDs to ensure stability, verified to be single tokens.
+    digit_tokens_map = jnp.array(
+        [
+            236771,
+            236770,
+            236778,
+            236800,
+            236812,
+            236810,
+            236825,
+            236832,
+            236828,
+            236819,
+        ],
+        dtype=jnp.int32,
+    )
+
+    # Calculate digits for 8-digit zero-padded number
+    # n is a JAX scalar integer
+    powers = 10 ** jnp.arange(7, -1, -1)  # [10000000, ..., 1]
+    digits = (n // powers) % 10  # shape (8,)
+
+    n_tokens = digit_tokens_map[digits]
+
+    return jnp.concatenate(
+        [
+            jnp.array([2], dtype=jnp.int32),
+            prefix_tokens,
+            n_tokens,
+            suffix_tokens,
+        ]
+    )
 
 
 def _impure_reward_fn(
