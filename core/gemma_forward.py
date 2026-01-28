@@ -273,7 +273,7 @@ def forward(xs: jax.Array, params: Params) -> jax.Array:
     xs = jnp.concatenate([xs, jnp.zeros_like(xs, shape=(padding_tokens,))])
 
     # embedding the tokens
-    xs = jax.vmap(lambda x: params["model.embed_tokens.weight"][x])(xs)
+    xs = params["model.embed_tokens.weight"][xs]
 
     # normalize according to Gemma reference implementation
     xs = jnp.sqrt(1152) * xs
@@ -294,6 +294,6 @@ def forward(xs: jax.Array, params: Params) -> jax.Array:
     xs = jax.vmap(RMSNorm, in_axes=(0, None))(xs, params["model.norm.weight"])
 
     # map to logits
-    xs = jax.vmap(lambda x: params["model.embed_tokens.weight"] @ x)(xs)
+    xs = xs @ params["model.embed_tokens.weight"].T
 
     return xs
