@@ -93,7 +93,7 @@ User: Calculate the square root of {n} up to three decimal places. Assistant:"""
 
 def _impure_reward_fn(
     output_tokens: jax.Array, int_to_radicate: int
-) -> tuple[float, int]:
+) -> tuple[float, float, float, int]:
     r"""
     Calculate a reward (both for correctness and for existence of thinking tags)
     given the models output.
@@ -119,7 +119,7 @@ def _impure_reward_fn(
         or text.count("<answer>") != 1
         or text.count("</answer>") != 1
     ):
-        return 0.0, end_pos
+        return 0.0, 0.0, 0.0, end_pos
 
     # 2. Strict Format Check
     # Must start with <think>, allow newlines in thinking, no newlines in answer.
@@ -129,7 +129,7 @@ def _impure_reward_fn(
     )
 
     if not match:
-        return 0.0, end_pos
+        return 0.0, 0.0, 0.0, end_pos
 
     # find the end position in tokens
     tokens = output_tokens.tolist()
@@ -149,7 +149,7 @@ def _impure_reward_fn(
 
     # Enforce no newlines in the raw answer content
     if "\n" in answer_raw:
-        return 0.0, end_pos
+        return 0.0, 0.0, 0.0, end_pos
 
     prediction_str = answer_raw.strip()
 
@@ -167,15 +167,17 @@ def _impure_reward_fn(
 
     # Combine
     reward = (format_score * FORMAT_WEIGHT) + (correctness_score * CORRECTNESS_WEIGHT)
-    return float(reward), int(end_pos)
+    return float(reward), float(format_score), float(correctness_score), int(end_pos)
 
 
 def reward_fn(
     output_tokens: jax.Array, int_to_radicate: int
-) -> tuple[jax.Array, jax.Array]:
+) -> tuple[jax.Array, jax.Array, jax.Array, jax.Array]:
     return jax.pure_callback(
         _impure_reward_fn,
         (
+            jax.ShapeDtypeStruct((), jnp.float32),
+            jax.ShapeDtypeStruct((), jnp.float32),
             jax.ShapeDtypeStruct((), jnp.float32),
             jax.ShapeDtypeStruct((), jnp.int32),
         ),
@@ -192,7 +194,7 @@ def objective_function(
     prompt: jax.Array,
     theta_old_log_probs: jax.Array,
     params_ref: Params,
-) -> jax.Array:
+) -> tuple[jax.Array, tuple[jax.Array, jax.Array]]:
     r"""
     The GRPO objective function that we can then differentiate with respect to the policy parameters \theta.
 
@@ -213,7 +215,12 @@ def objective_function(
     """
     prompt_len = prompt.shape[0]
 
-    rewards, end_of_answer_pos_relative = jax.vmap(reward_fn, in_axes=(0, None))(
+    (
+        rewards,
+        format_scores,
+        correctness_scores,
+        end_of_answer_pos_relative,
+    ) = jax.vmap(reward_fn, in_axes=(0, None))(
         group, int_to_radicate
     )  # shape [n,], where n is group size
     end_of_answer_pos = prompt_len + end_of_answer_pos_relative
@@ -260,7 +267,11 @@ def objective_function(
     # J_theta = mean(min(unclipped, clipped) - beta * KL)
     J_theta = jnp.mean(jnp.minimum(unclipped, clipped) - BETA * kl_penalty)
 
-    return -J_theta
+    # Calculate metrics
+    mean_format = jnp.mean(format_scores)
+    mean_correctness = jnp.mean(correctness_scores)
+
+    return -J_theta, (mean_format, mean_correctness)
 
 
 def mask_fn(
@@ -407,18 +418,18 @@ def get_group(
 
 def train_inner_loop(
     key: jax.random.PRNGKey, params: Params, params_ref: Params
-) -> tuple[jax.Array, jax.Array]:
+) -> tuple[jax.Array, jax.Array, jax.Array, jax.Array]:
     # sample a group
     grp, theta_old_log_probs, int_to_radicate, prompt = get_group(
         key, GROUP_SIZE, params
     )
 
     # put into objective function
-    loss, grads = jax.value_and_grad(objective_function)(
-        params, grp, int_to_radicate, prompt, theta_old_log_probs, params_ref
-    )
+    (loss, (mean_format, mean_correctness)), grads = jax.value_and_grad(
+        objective_function, has_aux=True
+    )(params, grp, int_to_radicate, prompt, theta_old_log_probs, params_ref)
 
-    return loss, grads
+    return loss, mean_format, mean_correctness, grads
 
 
 @jax.jit
@@ -427,7 +438,7 @@ def train_loop(
     params: Params,
     params_ref: Params,
     optimizer_state: optax.OptState,
-) -> tuple[Params, jax.Array, optax.OptState]:
+) -> tuple[Params, jax.Array, jax.Array, jax.Array, optax.OptState]:
     keys = jax.random.split(key, NUM_GROUPS_PER_UPDATE)
     inner_loop_partial = functools.partial(
         train_inner_loop, params=params, params_ref=params_ref
@@ -437,7 +448,9 @@ def train_loop(
     # )(  # might have to use jax.lax.map for sequential execution instead to prevent OOM
     #     keys, params, params_ref
     # )
-    losses, grads = jax.lax.map(inner_loop_partial, keys)
+    losses, format_scores, correctness_scores, grads = jax.lax.map(
+        inner_loop_partial, keys
+    )
 
     # average the grads
     accumulated_grads = jax.tree_util.tree_map(lambda g: jnp.mean(g, axis=0), grads)
@@ -448,7 +461,13 @@ def train_loop(
     )
     new_params = jax.tree_util.tree_map(lambda p, u: p + u, params, grad_updates)
 
-    return new_params, jnp.mean(losses), new_optimizer_state
+    return (
+        new_params,
+        jnp.mean(losses),
+        jnp.mean(format_scores),
+        jnp.mean(correctness_scores),
+        new_optimizer_state,
+    )
 
 
 def main():
@@ -459,9 +478,14 @@ def main():
     optimizer_state = optax.adam(LEARNING_RATE).init(params)
 
     # TODO: Use actual copy of parameters for \pi_ref as soon as we have enough memory
-    params, loss, optimizer_state = train_loop(key, params, params, optimizer_state)
-
-    print(loss)
+    for i in range(100):
+        params, loss, format_pct, correct_pct, optimizer_state = train_loop(
+            key, params, params, optimizer_state
+        )
+        key, _ = jax.random.split(key)
+        print(
+            f"{i}, Loss: {loss}, Format: {format_pct*100:.2f}%, Correct: {correct_pct*100:.2f}%"
+        )
 
 
 if __name__ == "__main__":
