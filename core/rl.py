@@ -470,6 +470,9 @@ def train_loop(
     )
 
 
+from utils.save_params import save_params
+
+
 def main():
     key = jax.random.PRNGKey(42)
     params = load_weights_as_dict("data/model_stacked_pt.safetensors")
@@ -477,15 +480,23 @@ def main():
     # initial adam state
     optimizer_state = optax.adam(LEARNING_RATE).init(params)
 
-    # TODO: Use actual copy of parameters for \pi_ref as soon as we have enough memory
-    for i in range(100):
+    params_ref = params
+    i = 0
+    while True:
         params, loss, format_pct, correct_pct, optimizer_state = train_loop(
-            key, params, params, optimizer_state
+            key, params, params_ref, optimizer_state
         )
         key, _ = jax.random.split(key)
         print(
-            f"{i}, Loss: {loss}, Format: {format_pct*100:.2f}%, Correct: {correct_pct*100:.2f}%"
+            f"{i}, Loss: {loss}, Format: {format_pct * 100:.2f}%, Correct: {correct_pct * 100:.2f}%"
         )
+        i += 1
+
+        if i % 100 == 0:
+            save_params(params)
+
+        if i % 400 == 0:
+            params_ref = params
 
 
 if __name__ == "__main__":

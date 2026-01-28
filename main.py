@@ -3,7 +3,6 @@ from dotenv import load_dotenv
 load_dotenv()
 
 import jax
-import os
 
 # os.environ["XLA_FLAGS"] = "--xla_force_host_platform_device_count=16"
 # print("Forcing the use of 16 devices.")
@@ -31,7 +30,7 @@ if __name__ == "__main__":
     # must be called before any importing anything that might use JAX
     init_dist()
 
-    from core.supervised_train import main
+    from core.rl import main
 
     main()
 
