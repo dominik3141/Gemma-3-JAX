@@ -386,6 +386,9 @@ def log_prop_of_trajectory(params: Params, trajectory: jax.Array, prompt: jax.Ar
     # get the logits for the full trajectory
     logits = forward(xs, params)
 
+    # use same temperature as at sample time
+    logits = logits / SAMPLE_TEMP
+
     # do the gather (expensive!)
     # logits[:-1] predicts xs[1:]
     log_probs = jax.nn.log_softmax(logits[:-1])
