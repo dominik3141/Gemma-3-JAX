@@ -243,8 +243,8 @@ def _impure_reward_fn(
                 )
                 f.write(f"Output:\n{text}\n")
                 f.write("-" * 80 + "\n")
-        except Exception:
-            pass
+        except Exception as e:
+            print(f"Error writing to training_samples.txt: {e}")
 
     return float(reward), float(format_score), float(correctness_score), int(end_pos)
 
@@ -581,9 +581,11 @@ def main():
 
         if i % 100 == 0:
             save_params(params)
+            print("Saved parameters")
 
         if i % 400 == 0:
             params_ref = params
+            print("Updated reference parameters")
 
 
 if __name__ == "__main__":
