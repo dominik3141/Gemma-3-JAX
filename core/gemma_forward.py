@@ -129,11 +129,13 @@ def globalAttn(Ks, Vs, Qs, pos_a, seq_indices) -> jax.Array:
     """
     If we are inside a global attention layer, we can attend to all tokens.
     """
+
+    def new_a(Ks, Vs, Q_a, idx_a, seq_indices) -> jax.Array:
+        scores = AttnScores(Q_a, Ks, idx_a, seq_indices, False)
+        return scores @ Vs
+
     return jax.vmap(
-        lambda Ks, Vs, Q_a, idx_a, seq_indices: AttnScores(
-            Q_a, Ks, idx_a, seq_indices, False
-        )
-        @ Vs,
+        new_a,
         in_axes=(None, None, 0, 0, None),
     )(Ks, Vs, Qs, pos_a, seq_indices)
 
