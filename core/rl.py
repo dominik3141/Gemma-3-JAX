@@ -544,7 +544,7 @@ def main():
     i = 0
     while True:
         params, loss, format_pct, correct_pct, optimizer_state = train_loop(
-            key, params, params, optimizer_state
+            key, params, params_ref, optimizer_state
         )
         key, _ = jax.random.split(key)
         print(
