@@ -1,5 +1,6 @@
 import jax.numpy as jnp
 import jax
+from functools import partial
 
 
 Params = dict[str, jax.Array]
@@ -125,43 +126,25 @@ def AttnScores(
     return jax.nn.softmax(scores.astype(jnp.float32)).astype(scores.dtype)
 
 
-def globalAttn(Ks, Vs, Qs, pos_a, seq_indices) -> jax.Array:
-    """
-    If we are inside a global attention layer, we can attend to all tokens.
-    """
-
-    def new_a(Ks, Vs, Q_a, idx_a, seq_indices) -> jax.Array:
-        scores = AttnScores(Q_a, Ks, idx_a, seq_indices, False)
-        return scores @ Vs
-
-    return jax.vmap(
-        new_a,
-        in_axes=(None, None, 0, 0, None),
-    )(Ks, Vs, Qs, pos_a, seq_indices)
-
-
-def localAttn(Ks, Vs, Qs, pos_a, seq_indices) -> jax.Array:
-    """
-    If we are inside a local attention layer, we have to slice K and V so we only attend to the
-    closest 1024 tokens.
-    """
-
-    def new_a(Ks, Vs, Q_a, idx_a, seq_indices) -> jax.Array:
-        scores = AttnScores(Q_a, Ks, idx_a, seq_indices, True)
-        return scores @ Vs
-
-    return jax.vmap(
-        new_a,
-        in_axes=(None, None, 0, 0, None),
-    )(Ks, Vs, Qs, pos_a, seq_indices)
-
-
 def attnHead(Ks, Vs, Qs, pos_a, is_local_attn) -> jax.Array:
     r"""
     We define
     Z_a := \sum_b Attn(a,b) * V_b,
     where Attn(a,b) := softmax((Q_a K_b^T)/sqrt(d_k))
     """
+
+    def Attn(is_local_attn: bool, Ks, Vs, Qs, pos_a, seq_indices) -> jax.Array:
+        return jax.vmap(
+            lambda Ks, Vs, Q_a, idx_a, seq_indices: AttnScores(
+                Q_a, Ks, idx_a, seq_indices, is_local_attn
+            )
+            @ Vs,
+            in_axes=(None, None, 0, 0, None),
+        )(Ks, Vs, Qs, pos_a, seq_indices)
+
+    localAttn = partial(Attn, True)
+    globalAttn = partial(Attn, False)
+
     seq_indices = jnp.arange(0, Ks.shape[0], 1)
     Z_a = jax.lax.cond(
         is_local_attn, localAttn, globalAttn, Ks, Vs, Qs, pos_a, seq_indices
@@ -219,8 +202,7 @@ def Block(xs: jax.Array, scans) -> jax.Array:
     For a fixed a, we want to calculate
         Z_a := \sum_b Attn(a,b) * V_b,
         where Attn(a,b) := softmax((Q_a K_b^T)/sqrt(d_k))
-    Z_a can be thought of as a version of a that has been enriched
-    with information from other tokens.
+    Z_a can be thought of as a version of a that has been enriched with information from other tokens.
 
     That would be easy enough for single head attention, but with four heads we have some extra level to take care of.
     """
