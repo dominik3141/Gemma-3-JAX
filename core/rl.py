@@ -28,6 +28,7 @@ LEARNING_RATE = (
 
 import re
 import math
+import random
 import jax
 import jax.numpy as jnp
 import optax
@@ -219,6 +220,33 @@ def _impure_reward_fn(
 
     # Combine
     reward = (format_score * FORMAT_WEIGHT) + (correctness_score * CORRECTNESS_WEIGHT)
+
+    # Logging mechanisms
+    # 1. Random sample (roughly 1 per iteration ~ 256 samples -> 0.004)
+    # 2. Sample with non-zero reward (roughly 1 per iteration if many exist -> 0.004)
+    should_log = False
+    log_type = ""
+
+    if random.random() < 0.004:
+        should_log = True
+        log_type = "RANDOM"
+    elif reward > 0.0 and random.random() < 0.01:
+        should_log = True
+        log_type = "NON-ZERO REWARD"
+
+    if should_log:
+        try:
+            with open("training_samples.txt", "a") as f:
+                f.write(f"Type: {log_type}\n")
+                f.write(f"Target: sqrt({int_to_radicate})\n")
+                f.write(
+                    f"Stats: Reward={reward:.2f}, Format={format_score}, Correct={correctness_score}\n"
+                )
+                f.write(f"Output:\n{text}\n")
+                f.write("-" * 80 + "\n")
+        except Exception:
+            pass
+
     return float(reward), float(format_score), float(correctness_score), int(end_pos)
 
 
