@@ -102,7 +102,7 @@ def postAttn(x: jax.Array, x_og: jax.Array, block_params: Params) -> jax.Array:
 
 
 def AttnScores(
-    Q_a: jax.Array, Ks: jax.Array, idx_a: jax.Array, seq_indices, local_attn=False
+    Q_a: jax.Array, Ks: jax.Array, idx_a: jax.Array, seq_indices, local_attn: bool
 ) -> jax.Array:
     """
     Calculates masked attention scores.
@@ -130,7 +130,9 @@ def globalAttn(Ks, Vs, Qs, pos_a, seq_indices) -> jax.Array:
     If we are inside a global attention layer, we can attend to all tokens.
     """
     return jax.vmap(
-        lambda Ks, Vs, Q_a, idx_a, seq_indices: AttnScores(Q_a, Ks, idx_a, seq_indices)
+        lambda Ks, Vs, Q_a, idx_a, seq_indices: AttnScores(
+            Q_a, Ks, idx_a, seq_indices, False
+        )
         @ Vs,
         in_axes=(None, None, 0, 0, None),
     )(Ks, Vs, Qs, pos_a, seq_indices)
@@ -143,7 +145,7 @@ def localAttn(Ks, Vs, Qs, pos_a, seq_indices) -> jax.Array:
     """
 
     def new_a(Ks, Vs, Q_a, idx_a, seq_indices) -> jax.Array:
-        scores = AttnScores(Q_a, Ks, idx_a, seq_indices, local_attn=True)
+        scores = AttnScores(Q_a, Ks, idx_a, seq_indices, True)
         return scores @ Vs
 
     return jax.vmap(
