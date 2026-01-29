@@ -116,11 +116,6 @@ def AttnScores(
     scores = jnp.where(seq_indices <= idx_a, scores, -jnp.inf)
 
     if local_attn:
-        # we need a mask m of the form
-        # [0,...,0,1,...1,0,...0],
-        # where m_i = 1 iff | i - idx_a | <= 512
-        # because of causal masking, we can simplify this and always assume
-        # that we are looking back
         scores = jnp.where(idx_a - seq_indices <= 1024, scores, -jnp.inf)
 
     return jax.nn.softmax(scores.astype(jnp.float32)).astype(scores.dtype)
