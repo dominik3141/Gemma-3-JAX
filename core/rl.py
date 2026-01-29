@@ -14,8 +14,8 @@ Plan:
 4.  Backpropagate
 """
 
-MAX_ROOT = 90000000
-MIN_ROOT = 1000
+MAX_ROOT = 900
+MIN_ROOT = 1
 SAMPLE_TEMP = 1  # as suggested by R1 paper
 GROUP_SIZE = 8  # as suggested by R1 paper
 MAX_RESPONSE_LENGTH = 250
@@ -213,10 +213,8 @@ def _impure_reward_fn(
                 format_score = 0.0
                 correctness_score = 0.0
 
-                # Combine
-                reward = (format_score * FORMAT_WEIGHT) + (
-                    correctness_score * CORRECTNESS_WEIGHT
-                )
+    # Combine
+    reward = (format_score * FORMAT_WEIGHT) + (correctness_score * CORRECTNESS_WEIGHT)
 
     # Logging mechanisms
     # 1. Random sample (roughly 1 per iteration ~ 256 samples -> 0.004)
