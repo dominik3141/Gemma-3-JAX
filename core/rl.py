@@ -165,61 +165,60 @@ def _impure_reward_fn(
     FORMAT_WEIGHT = 1.0
     CORRECTNESS_WEIGHT = 1.0
 
+    format_score = 0.0
+    correctness_score = 0.0
+    reward = 0.0
+
     # 1. Strict Tag Count Check
     if (
-        text.count("<think>") != 1
-        or text.count("</think>") != 1
-        or text.count("<answer>") != 1
-        or text.count("</answer>") != 1
+        text.count("<think>") == 1
+        and text.count("</think>") == 1
+        and text.count("<answer>") == 1
+        and text.count("</answer>") == 1
     ):
-        return 0.0, 0.0, 0.0, end_pos
+        # 2. Strict Format Check
+        # Must start with <think>, allow newlines in thinking, no newlines in answer.
+        # We ignore everything after the first </answer> by not anchoring to the end.
+        match = re.search(
+            r"^\s*<think>(.*?)</think>\s*<answer>(.*?)</answer>", text, re.DOTALL
+        )
 
-    # 2. Strict Format Check
-    # Must start with <think>, allow newlines in thinking, no newlines in answer.
-    # We ignore everything after the first </answer> by not anchoring to the end.
-    match = re.search(
-        r"^\s*<think>(.*?)</think>\s*<answer>(.*?)</answer>", text, re.DOTALL
-    )
+        if match:
+            # find the end position in tokens
+            tokens = output_tokens.tolist()
+            # We search for the sequence </answer>.
+            # From our tests, answer> is [14433, 236813] and </ is 954 or 1454 (with space).
+            for i in range(len(tokens) - 1):
+                if tokens[i : i + 2] == [14433, 236813]:
+                    if i > 0 and tokens[i - 1] in [954, 1454]:
+                        end_pos = i + 2
+                        break
 
-    if not match:
-        return 0.0, 0.0, 0.0, end_pos
+            # 3. Content Validation
+            answer_raw = match.group(2)
 
-    # find the end position in tokens
-    tokens = output_tokens.tolist()
-    # We search for the sequence </answer>.
-    # From our tests, answer> is [14433, 236813] and </ is 954 or 1454 (with space).
-    for i in range(len(tokens) - 1):
-        if tokens[i : i + 2] == [14433, 236813]:
-            if i > 0 and tokens[i - 1] in [954, 1454]:
-                end_pos = i + 2
-                break
+            # Enforce no newlines in the raw answer content
+            if "\n" not in answer_raw:
+                format_score = 1.0
 
-    format_score = 1.0
-    correctness_score = 0.0
+                prediction_str = answer_raw.strip()
 
-    # 3. Content Validation
-    answer_raw = match.group(2)
+                # 4. Correctness Check
+                try:
+                    prediction = float(prediction_str)
+                    target = math.sqrt(float(int_to_radicate))
 
-    # Enforce no newlines in the raw answer content
-    if "\n" in answer_raw:
-        return 0.0, 0.0, 0.0, end_pos
+                    # Check if close enough
+                    if abs(prediction - target) < 1e-3:
+                        correctness_score = 1.0
 
-    prediction_str = answer_raw.strip()
+                except ValueError:
+                    correctness_score = 0.0
 
-    # 4. Correctness Check
-    try:
-        prediction = float(prediction_str)
-        target = math.sqrt(float(int_to_radicate))
-
-        # Check if close enough
-        if abs(prediction - target) < 1e-3:
-            correctness_score = 1.0
-
-    except ValueError:
-        correctness_score = 0.0
-
-    # Combine
-    reward = (format_score * FORMAT_WEIGHT) + (correctness_score * CORRECTNESS_WEIGHT)
+                # Combine
+                reward = (format_score * FORMAT_WEIGHT) + (
+                    correctness_score * CORRECTNESS_WEIGHT
+                )
 
     # Logging mechanisms
     # 1. Random sample (roughly 1 per iteration ~ 256 samples -> 0.004)
