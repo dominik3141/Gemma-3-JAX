@@ -197,23 +197,21 @@ def _impure_reward_fn(
             # 3. Content Validation
             answer_raw = match.group(2)
 
-            # Enforce no newlines in the raw answer content
-            if "\n" not in answer_raw:
+            # Enforce that the answer is a valid float
+            # float() handles surrounding whitespace and newlines
+            try:
+                prediction = float(answer_raw)
                 format_score = 1.0
 
-                prediction_str = answer_raw.strip()
+                target = math.sqrt(float(int_to_radicate))
 
-                # 4. Correctness Check
-                try:
-                    prediction = float(prediction_str)
-                    target = math.sqrt(float(int_to_radicate))
+                # Check if close enough
+                if abs(prediction - target) < 1e-3:
+                    correctness_score = 1.0
 
-                    # Check if close enough
-                    if abs(prediction - target) < 1e-3:
-                        correctness_score = 1.0
-
-                except ValueError:
-                    correctness_score = 0.0
+            except ValueError:
+                format_score = 0.0
+                correctness_score = 0.0
 
                 # Combine
                 reward = (format_score * FORMAT_WEIGHT) + (
