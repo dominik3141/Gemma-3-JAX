@@ -1,3 +1,7 @@
+r"""
+All comments that include concrete dimensionality numbers are written with the 1B version of Gemma in mind.
+"""
+
 import jax.numpy as jnp
 import jax
 from functools import partial
@@ -5,6 +9,17 @@ from utils.inspect_weights import load_weights_as_dict
 
 
 Params = dict[str, jax.Array]
+
+# Config for the 27B version
+config = {
+    "num_attention_heads": 32,
+    "num_key_value_heads": 16,
+    "num_layers": 62,
+    "d_model": 5376,
+    "d_kvq": 128,
+    "d_mlp": 21504,
+    "sliding_window": 1024,
+}
 
 
 def RMSNorm(x: jax.Array, gamma: jax.Array) -> jax.Array:
@@ -58,30 +73,34 @@ def mlp(
 def calc_qkv(
     x: jax.Array, block_params: Params, pos: jax.Array, is_local_attn: jax.Array
 ) -> tuple[jax.Array, jax.Array, jax.Array]:
-    NUM_GROUPS = 16  # PLACEHOLDER
-    KVQ_DIM = 128
-    NUM_QUERIES_PER_GROUP = 2
+    num_queries_per_group = config.num_attention_heads / config.num_key_value_heads
 
     # Prepare for attention
     theta = jnp.where(is_local_attn, 10_000.0, 1_000_000.0)
 
     Ks = block_params["self_attn.k_proj.weight"] @ x
-    Ks = jnp.reshape(Ks, (NUM_GROUPS, KVQ_DIM))
+    Ks = jnp.reshape(Ks, (config.num_key_value_heads, config.head_dim))
     Ks = jax.vmap(RMSNorm, in_axes=(0, None))(
         Ks, block_params["self_attn.k_norm.weight"]
     )
     Ks = jax.vmap(RoPE, in_axes=(0, None, None))(Ks, pos, theta)
 
     Vs = block_params["self_attn.v_proj.weight"] @ x
-    Vs = jnp.reshape(Vs, (NUM_GROUPS, KVQ_DIM))
+    Vs = jnp.reshape(Vs, (config.num_key_value_heads, config.d_kvq))
 
     Qss = block_params["self_attn.q_proj.weight"] @ x
-    Qss = jnp.reshape(Qss, (NUM_GROUPS * NUM_QUERIES_PER_GROUP, KVQ_DIM))
+    Qss = jnp.reshape(
+        Qss,
+        (config.num_key_value_heads * num_queries_per_group, config.d_kvq),
+    )
     Qss = jax.vmap(lambda Q: RMSNorm(Q, block_params["self_attn.q_norm.weight"]))(Qss)
     Qss = jax.vmap(lambda Q, p, theta: RoPE(Q, p, theta), in_axes=(0, None, None))(
         Qss, pos, theta
     )
-    Qss = jnp.reshape(Qss, (NUM_GROUPS, NUM_QUERIES_PER_GROUP, KVQ_DIM))
+    Qss = jnp.reshape(
+        Qss,
+        (config.num_key_value_heads, num_queries_per_group, config.d_kvq),
+    )
 
     return Ks, Vs, Qss
 
@@ -123,7 +142,9 @@ def AttnScores(
     scores = jnp.where(seq_indices <= idx_a, scores, -jnp.inf)
 
     if local_attn:
-        scores = jnp.where(idx_a - seq_indices <= 1024, scores, -jnp.inf)
+        scores = jnp.where(
+            idx_a - seq_indices <= config.sliding_window, scores, -jnp.inf
+        )
 
     return jax.nn.softmax(scores.astype(jnp.float32)).astype(scores.dtype)
 
@@ -285,15 +306,17 @@ def forward(xs: jax.Array, params: Params) -> jax.Array:
     xs = params["model.embed_tokens.weight"][xs]
 
     # normalize according to Gemma reference implementation
-    xs = jnp.sqrt(1152) * xs
+    xs = jnp.sqrt(config.d_model) * xs
 
     # BLOCKS
     # Create the pattern list based on the config
     # 26 layers total: (5 local, 1 global) * 4 + 2 local
-    layer_types = (["local"] * 5 + ["global"]) * 4 + ["local"] * 2
+    layer_types = (["local"] * 5 + ["global"]) * 10 + [
+        "local"
+    ] * 2  # needs to be parametrized by config
     is_local_attn = jnp.array(
         [t == "local" for t in layer_types]
-    )  # shape (26,), [1,1...,1,1]
+    )  # shape (NUM_LAYERS,), [1,1...,1,1]
     xs, _ = jax.lax.scan(Block, xs, (extract_block_params(params), is_local_attn))
 
     # remove padding again (to save memory)
