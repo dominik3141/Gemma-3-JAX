@@ -1,6 +1,7 @@
 import jax.numpy as jnp
 import jax
 from functools import partial
+from utils.inspect_weights import load_weights_as_dict
 
 
 Params = dict[str, jax.Array]
@@ -14,10 +15,6 @@ def RMSNorm(x: jax.Array, gamma: jax.Array) -> jax.Array:
 
 
 def RoPE(x: jax.Array, position: int, theta: float) -> jax.Array:
-    """
-    Gemma-style RoPE matching the PyTorch reference you pasted (complex rotation
-    with half/half layout, not even/odd interleaving).
-    """
     d = x.shape[-1]
     if d % 2 != 0:
         raise ValueError(f"RoPE requires even head_dim, got {d}")
@@ -61,22 +58,32 @@ def mlp(
 def calc_qkv(
     x: jax.Array, block_params: Params, pos: jax.Array, is_local_attn: jax.Array
 ) -> tuple[jax.Array, jax.Array, jax.Array]:
+    NUM_GROUPS = 16  # PLACEHOLDER
+    KVQ_DIM = 128
+    NUM_QUERIES_PER_GROUP = 2
+
     # Prepare for attention
     theta = jnp.where(is_local_attn, 10_000.0, 1_000_000.0)
-    K = block_params["self_attn.k_proj.weight"] @ x
-    K = RMSNorm(K, block_params["self_attn.k_norm.weight"])
-    K = RoPE(K, pos, theta)
 
-    V = block_params["self_attn.v_proj.weight"] @ x
-
-    Qs = block_params["self_attn.q_proj.weight"] @ x
-    Qs = jnp.reshape(Qs, (4, 256))
-    Qs = jax.vmap(lambda Q: RMSNorm(Q, block_params["self_attn.q_norm.weight"]))(Qs)
-    Qs = jax.vmap(lambda Q, p, theta: RoPE(Q, p, theta), in_axes=(0, None, None))(
-        Qs, pos, theta
+    Ks = block_params["self_attn.k_proj.weight"] @ x
+    Ks = jnp.reshape(Ks, (NUM_GROUPS, KVQ_DIM))
+    Ks = jax.vmap(RMSNorm, in_axes=(0, None))(
+        Ks, block_params["self_attn.k_norm.weight"]
     )
+    Ks = jax.vmap(RoPE, in_axes=(0, None, None))(Ks, pos, theta)
 
-    return K, V, Qs
+    Vs = block_params["self_attn.v_proj.weight"] @ x
+    Vs = jnp.reshape(Vs, (NUM_GROUPS, KVQ_DIM))
+
+    Qss = block_params["self_attn.q_proj.weight"] @ x
+    Qss = jnp.reshape(Qss, (NUM_GROUPS * NUM_QUERIES_PER_GROUP, KVQ_DIM))
+    Qss = jax.vmap(lambda Q: RMSNorm(Q, block_params["self_attn.q_norm.weight"]))(Qss)
+    Qss = jax.vmap(lambda Q, p, theta: RoPE(Q, p, theta), in_axes=(0, None, None))(
+        Qss, pos, theta
+    )
+    Qss = jnp.reshape(Qss, (NUM_GROUPS, NUM_QUERIES_PER_GROUP, KVQ_DIM))
+
+    return Ks, Vs, Qss
 
 
 def postAttn(x: jax.Array, x_og: jax.Array, block_params: Params) -> jax.Array:
@@ -148,6 +155,25 @@ def attnHead(Ks, Vs, Qs, pos_a, is_local_attn) -> jax.Array:
     return Z_a
 
 
+def group_attention(
+    xs, Ks, Vs, Qss, sequence_len: int, is_local_attn, pos
+) -> jax.Array:
+    """
+    In GQA, there might be mutliple queries per group.
+    """
+    Qss = jnp.transpose(Qss, (1, 0, 2))  # different queries as first axis
+
+    # inside the group, we descend onto the level of individual queries
+    xs = jax.vmap(
+        attnHead,
+        in_axes=(None, None, 0, None, None),
+    )(Ks, Vs, Qss, pos, is_local_attn)
+    xs = jnp.transpose(xs, (sequence_len, 4 * 256))
+    xs = jnp.reshape(xs, (sequence_len, 4 * 256))  # concat heads
+
+    return xs
+
+
 @jax.jit  # the scan should already compile this, but better to be explicit
 @jax.checkpoint  # OOM problems without this
 def Block(xs: jax.Array, scans) -> jax.Array:
@@ -185,7 +211,7 @@ def Block(xs: jax.Array, scans) -> jax.Array:
     sequence_len = xs.shape[0]
     pos = jnp.arange(0, sequence_len, 1, dtype=int)
 
-    Ks, Vs, Qss = jax.vmap(calc_qkv, in_axes=(0, None, 0, None))(
+    Kss, Vss, Qsss = jax.vmap(calc_qkv, in_axes=(0, None, 0, None))(
         xs, block_params, pos, is_local_attn
     )
 
@@ -201,14 +227,16 @@ def Block(xs: jax.Array, scans) -> jax.Array:
 
     That would be easy enough for single head attention, but with four heads we have some extra level to take care of.
     """
-    # first we go onto the level of individual heads
-    Qss = jnp.transpose(Qss, (1, 0, 2))  # head dimension should be first
+    # we go onto the level of individual groups
     xs = jax.vmap(
-        attnHead,
-        in_axes=(None, None, 0, None, None),
-    )(Ks, Vs, Qss, pos, is_local_attn)
-    xs = jnp.transpose(xs, (1, 0, 2))  # (Seq, 4, 256)
-    xs = jnp.reshape(xs, (sequence_len, 4 * 256))  # concat heads
+        partial(group_attention, sequence_len=sequence_len),
+        in_axes=(None, 0, 0, 0),
+    )(
+        xs,
+        Kss,
+        Vss,
+        Qsss,
+    )
 
     xs = jax.vmap(postAttn, in_axes=(0, 0, None))(xs, xs_og, block_params)
 
@@ -278,3 +306,16 @@ def forward(xs: jax.Array, params: Params) -> jax.Array:
     xs = xs @ params["model.embed_tokens.weight"].T
 
     return xs
+
+
+@jax.jit
+def main():
+    params = load_weights_as_dict("data/model_stacked_pt.safetensors")
+    xs = jnp.array([2, 4237, 3234, 1293094])
+
+    xs = forward(xs, params)
+
+    return xs
+
+
+print(main())
