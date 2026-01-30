@@ -14,6 +14,7 @@ Params = dict[str, jax.Array]
 config = {
     "num_attention_heads": 32,
     "num_key_value_heads": 16,
+    "num_queries_per_group": 2,
     "num_layers": 62,
     "d_model": 5376,
     "d_kvq": 128,
@@ -73,8 +74,6 @@ def mlp(
 def calc_qkv(
     x: jax.Array, block_params: Params, pos: jax.Array, is_local_attn: jax.Array
 ) -> tuple[jax.Array, jax.Array, jax.Array]:
-    num_queries_per_group = config.num_attention_heads / config.num_key_value_heads
-
     # Prepare for attention
     theta = jnp.where(is_local_attn, 10_000.0, 1_000_000.0)
 
@@ -91,7 +90,7 @@ def calc_qkv(
     Qss = block_params["self_attn.q_proj.weight"] @ x
     Qss = jnp.reshape(
         Qss,
-        (config.num_key_value_heads * num_queries_per_group, config.d_kvq),
+        (config.num_key_value_heads * config.num_queries_per_group, config.d_kvq),
     )
     Qss = jax.vmap(lambda Q: RMSNorm(Q, block_params["self_attn.q_norm.weight"]))(Qss)
     Qss = jax.vmap(lambda Q, p, theta: RoPE(Q, p, theta), in_axes=(0, None, None))(
@@ -99,7 +98,7 @@ def calc_qkv(
     )
     Qss = jnp.reshape(
         Qss,
-        (config.num_key_value_heads, num_queries_per_group, config.d_kvq),
+        (config.num_key_value_heads, config.num_queries_per_group, config.d_kvq),
     )
 
     return Ks, Vs, Qss
@@ -189,8 +188,10 @@ def group_attention(
         attnHead,
         in_axes=(None, None, 0, None, None),
     )(Ks, Vs, Qss, pos, is_local_attn)
-    xs = jnp.transpose(xs, (sequence_len, 4 * 256))
-    xs = jnp.reshape(xs, (sequence_len, 4 * 256))  # concat heads
+    xs = jnp.transpose(xs, (sequence_len, config.num_queries_per_group * config.d_kvq))
+    xs = jnp.reshape(
+        xs, (sequence_len, config.num_queries_per_group * config.d_kvq)
+    )  # concat heads
 
     return xs
 
@@ -275,6 +276,24 @@ def extract_block_params(params: Params) -> Params:
     return block_params
 
 
+def get_gemma3_layer_types(num_layers: int) -> jax.Array:
+    """
+    Generates a boolean mask for Gemma 3 attention layers.
+    True = Local sliding window attention
+    False = Global attention
+
+    Pattern: 5 local, 1 global (Ratio 5:1), starting with local.
+    """
+    # Create indices: [0, 1, 2, ..., num_layers - 1]
+    indices = jnp.arange(num_layers)
+
+    # Global layers are at indices 5, 11, 17, etc. (where (i+1) % 6 == 0)
+    # We want True for local, so we check for NOT being a global index.
+    is_local = (indices + 1) % 6 != 0
+
+    return is_local
+
+
 @jax.jit
 def forward(xs: jax.Array, params: Params) -> jax.Array:
     r"""
@@ -309,14 +328,8 @@ def forward(xs: jax.Array, params: Params) -> jax.Array:
     xs = jnp.sqrt(config.d_model) * xs
 
     # BLOCKS
-    # Create the pattern list based on the config
-    # 26 layers total: (5 local, 1 global) * 4 + 2 local
-    layer_types = (["local"] * 5 + ["global"]) * 10 + [
-        "local"
-    ] * 2  # needs to be parametrized by config
-    is_local_attn = jnp.array(
-        [t == "local" for t in layer_types]
-    )  # shape (NUM_LAYERS,), [1,1...,1,1]
+    # Generate the pattern list based on the 5:1 interleaving rule
+    is_local_attn = get_gemma3_layer_types(config.num_layers)
     xs, _ = jax.lax.scan(Block, xs, (extract_block_params(params), is_local_attn))
 
     # remove padding again (to save memory)
