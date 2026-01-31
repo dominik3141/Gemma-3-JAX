@@ -24,7 +24,7 @@ def load_weights_as_dict(path: str) -> dict[str, jax.Array]:
 
 
 if __name__ == "__main__":
-    weights = load_weights_as_dict("data/model_stacked_pt.safetensors")
+    weights = load_weights_as_dict("data/gemma-1b/model_stacked_pt.safetensors")
     for key in weights.keys():
         print(key, weights[key].shape)
 

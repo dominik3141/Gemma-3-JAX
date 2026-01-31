@@ -80,7 +80,7 @@ def main(num_batches=100):
     # keys and parameters
     key = jax.random.key(42)
     print("Loading weights...")
-    params = load_weights_as_dict("data/model_stacked_pt.safetensors")
+    params = load_weights_as_dict("data/gemma-1b/model_stacked_pt.safetensors")
     print("Weights loaded.")
 
     # Distributed training

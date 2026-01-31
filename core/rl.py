@@ -558,7 +558,7 @@ from utils.save_params import save_params
 
 def main():
     key = jax.random.PRNGKey(42)
-    params = load_weights_as_dict("data/model_stacked_pt.safetensors")
+    params = load_weights_as_dict("data/gemma-1b/model_stacked_pt.safetensors")
 
     # initial adam state
     optimizer_state = optax.adam(LEARNING_RATE).init(params)
