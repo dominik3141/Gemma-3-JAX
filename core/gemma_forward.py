@@ -21,9 +21,6 @@ config = SimpleNamespace(
     d_kvq=128,
     d_mlp=21504,
     sliding_window=1024,
-    head_dim=128,
-    hidden_size=5376,
-    sliding_windows=1024,
 )
 
 
@@ -192,10 +189,10 @@ def group_attention(
         attnHead,
         in_axes=(None, None, 0, None, None),
     )(Ks, Vs, Qss, pos, is_local_attn)
-    xs = jnp.transpose(xs, (sequence_len, config.num_queries_per_group * config.d_kvq))
+    xs = jnp.transpose(xs, (1, 0, 2))  # seq_len first
     xs = jnp.reshape(
         xs, (sequence_len, config.num_queries_per_group * config.d_kvq)
-    )  # concat heads
+    )  # concat query results
 
     return xs
 
@@ -263,6 +260,10 @@ def Block(xs: jax.Array, scans) -> jax.Array:
         Vss,
         Qsss,
     )
+    xs = jnp.transpose(xs, (1, 0, 2))
+    xs = jnp.reshape(
+        xs, sequence_len, config.num_attn_heads * config.d_kvq
+    )  # concat heads
 
     xs = jax.vmap(postAttn, in_axes=(0, 0, None))(xs, xs_og, block_params)
 
