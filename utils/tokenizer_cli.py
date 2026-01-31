@@ -34,8 +34,8 @@ def main():
     parser.add_argument(
         "--model_path",
         type=str,
-        default="data/gemma-1b/tokenizer.model",
-        help="Path to the tokenizer.model file (default: data/gemma-1b/tokenizer.model)",
+        default="data/gemma-3-1b/tokenizer.model",
+        help="Path to the tokenizer.model file (default: data/gemma-3-1b/tokenizer.model)",
     )
     parser.add_argument(
         "--decode",

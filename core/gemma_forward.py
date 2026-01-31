@@ -351,7 +351,7 @@ def forward(xs: jax.Array, params: Params) -> jax.Array:
 
 @jax.jit
 def main():
-    params = load_weights_as_dict("data/gemma-1b/model_stacked_pt.safetensors")
+    params = load_weights_as_dict("data/gemma-3-1b/model_stacked_pt.safetensors")
     xs = jnp.array([2, 4237, 3234, 1293094])
 
     xs = forward(xs, params)

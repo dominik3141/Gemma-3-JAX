@@ -21,7 +21,7 @@ GIT_USER_NAME = "Dominik Farr"
 GIT_USER_EMAIL = "dominik.farr@icloud.com"
 WEIGHTS_BUCKET = "gemma_tmp_12342378236hf"
 WEIGHTS_FILE = "model_stacked_pt.safetensors"
-WEIGHTS_LOCAL_PATH = "data/gemma-1b/model_stacked_pt.safetensors"
+WEIGHTS_LOCAL_PATH = "data/gemma-3-1b/model_stacked_pt.safetensors"
 
 
 def run(cmd, check=True, shell=False):

@@ -142,8 +142,8 @@ def main() -> None:
     from utils.inspect_weights import load_weights_as_dict
     from utils.tokenize import tokenize_text, detokenize_ids
 
-    print("Loading weights from data/gemma-1b/model_stacked_pt.safetensors...")
-    params = load_weights_as_dict("data/gemma-1b/model_stacked_pt.safetensors")
+    print("Loading weights from data/gemma-3-1b/model_stacked_pt.safetensors...")
+    params = load_weights_as_dict("data/gemma-3-1b/model_stacked_pt.safetensors")
     print("Weights loaded.")
 
     prompt = "The capital of France is Paris. The capital of Germany is"

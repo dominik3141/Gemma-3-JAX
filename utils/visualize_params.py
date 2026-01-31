@@ -115,7 +115,7 @@ def visualize_weights(path: str):
 if __name__ == "__main__":
     import sys
 
-    weight_path = "data/gemma-1b/model_stacked_it.safetensors"
+    weight_path = "data/gemma-3-1b/model_stacked_it.safetensors"
     if len(sys.argv) > 1:
         weight_path = sys.argv[1]
     visualize_weights(weight_path)
