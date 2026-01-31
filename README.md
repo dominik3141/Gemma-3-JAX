@@ -17,7 +17,8 @@ This is very much a work in progress, but the current code already samples not o
 ## ToDo
 
 1. Flash attention[^1]
-2. All other inference optimizations I can come up with
-3. Commit the HLO dumps so we can easily spot bisect expected XLA performance issues relative to code changes
+2. Muon instead of Adam
+3. All other inference optimizations I can come up with
+4. Commit the HLO dumps so we can easily spot bisect expected XLA performance issues relative to code changes
 
 [^1]: The reason I haven't done this yet is because I want to implement it myself and JAX primitives are insufficient, so I will have to go one level lower and implement it in Pallas. But first I have to learn Pallas, so this might take a week or two.
