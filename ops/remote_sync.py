@@ -26,6 +26,11 @@ def sync_code(vm_name, zone, is_tpu):
         "*.ckpt",
         "source_*.tar.gz",
         "dev_sync.tar.gz",
+        "data",  # Don't sync data directory
+        "jax-trace",  # JAX trace files (2.7GB!)
+        "HLO_dumps",  # HLO dumps
+        ".ruff_cache",  # Ruff cache
+        ".DS_Store",  # macOS metadata
     ]
 
     # Simple fallback: Tar locally with excludes, SCP tar, Untar remotely.
