@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
 """
-Zero-dependency setup script for JAX Gemma 1B.
+Zero-dependency setup script for JAX Gemma (1B/27B).
 Runs on Compute Engine environments.
 
 Responsibilities:
 1. Configure Git (for dev/debug).
 2. Install `uv`.
 3. Sync dependencies (`uv sync`).
-4. Download model weights from GCS.
+4. Mount model weights from GCS (gcsfuse).
 5. Launch `main.py`.
 """
 
@@ -15,13 +15,24 @@ import os
 import subprocess
 import shutil
 import argparse
+import sys
 
 # --- Configuration ---
 GIT_USER_NAME = "Dominik Farr"
 GIT_USER_EMAIL = "dominik.farr@icloud.com"
-WEIGHTS_BUCKET = "gemma_tmp_12342378236hf"
-WEIGHTS_FILE = "model_stacked_pt.safetensors"
-WEIGHTS_LOCAL_PATH = "data/gemma-3-1b/model_stacked_pt.safetensors"
+MODEL_CONFIG = {
+    "1b": {
+        "bucket": "gemma_tmp_12342378236hf",
+        "mount_dir": "data/gemma-3-1b",
+        "sentinel": "model_stacked_pt.safetensors",
+    },
+    "27b": {
+        "bucket": "gemma-3-weights-231d4b",
+        "mount_dir": "data/gemma-3-27b",
+        "only_dir": "gemma-weights",
+        "sentinel": "model.safetensors.index.json",
+    },
+}
 
 
 def run(cmd, check=True, shell=False):
@@ -110,30 +121,83 @@ def sync_dependencies():
     run(cmd)
 
 
-def download_weights():
-    if os.path.exists(WEIGHTS_LOCAL_PATH):
-        print(f"--- Weights already exist at {WEIGHTS_LOCAL_PATH} ---")
+def install_gcsfuse():
+    if shutil.which("gcsfuse"):
+        print("--- gcsfuse already installed ---")
         return
 
-    print(f"--- Downloading base weights from gs://{WEIGHTS_BUCKET} ---")
+    if not shutil.which("apt-get"):
+        print("ERROR: gcsfuse not installed and apt-get not available.")
+        print("Install gcsfuse manually, then re-run setup.")
+        sys.exit(1)
 
-    # Python logic to download base weights strictly
-    download_script = f"""
-from google.cloud import storage
+    if not shutil.which("sudo"):
+        print("ERROR: sudo not available to install gcsfuse.")
+        print("Install gcsfuse manually, then re-run setup.")
+        sys.exit(1)
 
-client = storage.Client()
-bucket = client.bucket('{WEIGHTS_BUCKET}')
-blob = bucket.blob('{WEIGHTS_FILE}')
+    print("--- Installing gcsfuse ---")
+    run(["sudo", "apt-get", "update"])
+    result = subprocess.run(["sudo", "apt-get", "install", "-y", "gcsfuse"])
+    if result.returncode != 0:
+        print("ERROR: Failed to install gcsfuse with apt-get.")
+        print("Install gcsfuse manually, then re-run setup.")
+        sys.exit(1)
 
-if not blob.exists():
-    print(f"ERROR: Base weights '{{blob.name}}' not found in bucket '{{bucket.name}}'!")
-    import sys
-    sys.exit(1)
 
-print(f"Downloading base weights {{blob.name}} to {WEIGHTS_LOCAL_PATH}...")
-blob.download_to_filename('{WEIGHTS_LOCAL_PATH}')
-"""
-    run(["uv", "run", "python", "-c", download_script])
+def is_mountpoint(path: str) -> bool:
+    if os.path.ismount(path):
+        return True
+    try:
+        with open("/proc/mounts", "r") as f:
+            for line in f:
+                parts = line.split()
+                if len(parts) >= 2 and parts[1] == path:
+                    return True
+    except FileNotFoundError:
+        pass
+    return False
+
+
+def mount_bucket(bucket: str, mount_dir: str, only_dir=None) -> None:
+    if is_mountpoint(mount_dir):
+        print(f"--- Bucket already mounted at {mount_dir} ---")
+        return
+
+    os.makedirs(mount_dir, exist_ok=True)
+
+    cmd = ["gcsfuse", "--implicit-dirs"]
+    if only_dir:
+        cmd.extend(["--only-dir", only_dir])
+    cmd.extend([bucket, mount_dir])
+    run(cmd)
+
+
+def mount_weights(model_size: str):
+    config = MODEL_CONFIG[model_size]
+    mount_dir = config["mount_dir"]
+    sentinel_path = os.path.join(mount_dir, config["sentinel"])
+
+    if is_mountpoint(mount_dir) and os.path.exists(sentinel_path):
+        print(f"--- Weights already mounted at {sentinel_path} ---")
+        return
+
+    install_gcsfuse()
+
+    bucket = config["bucket"]
+    only_dir = config.get("only_dir")
+
+    label = "1B" if model_size == "1b" else "27B"
+    if only_dir:
+        print(f"--- Mounting {label} weights from gs://{bucket}/{only_dir} ---")
+    else:
+        print(f"--- Mounting {label} weights from gs://{bucket} ---")
+
+    mount_bucket(bucket, mount_dir, only_dir=only_dir)
+
+    if not os.path.exists(sentinel_path):
+        print(f"ERROR: Expected weights file missing after mount: {sentinel_path}")
+        sys.exit(1)
 
 
 def create_env_file():
@@ -149,6 +213,11 @@ def create_env_file():
 def main():
     parser = argparse.ArgumentParser(description="Setup JAX environment")
     parser.add_argument(
+        "model_size",
+        choices=sorted(MODEL_CONFIG.keys()),
+        help="Model size to download weights for (1b or 27b).",
+    )
+    parser.add_argument(
         "--run-main", action="store_true", help="Launch main.py after setup"
     )
     # Capture unknown args to pass to main.py if needed
@@ -160,7 +229,7 @@ def main():
     setup_git()
     install_uv()
     sync_dependencies()
-    download_weights()
+    mount_weights(args.model_size)
 
     if args.run_main:
         print("--- Launching main.py ---")
