@@ -238,7 +238,6 @@ def Block(xs: jax.Array, scans) -> jax.Array:
     Kss, Vss, Qsss = jax.vmap(calc_qkv, in_axes=(0, None, 0, None))(
         xs, block_params, pos, is_local_attn
     )
-
     # COMMUNICATION WITH OTHER TOKENS
     r"""
     The usual representation of the attention formula hides a lot of interesting stuff behind matrix operations,
@@ -374,5 +373,5 @@ def main():
 
     return xs
 
-
-print(main())
+if __name__ == "__main__":
+    print(main())
