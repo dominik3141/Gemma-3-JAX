@@ -254,12 +254,14 @@ def Block(xs: jax.Array, scans) -> jax.Array:
     # we go onto the level of individual groups
     xs = jax.vmap(
         partial(group_attention, sequence_len=sequence_len),
-        in_axes=(None, 0, 0, 0),
+        in_axes=(None, 0, 0, 0, None, None),
     )(
         xs,
         Kss,
         Vss,
         Qsss,
+        is_local_attn,
+        pos,
     )
     xs = jnp.transpose(xs, (1, 0, 2))
     xs = jnp.reshape(
