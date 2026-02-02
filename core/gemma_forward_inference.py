@@ -23,11 +23,33 @@ import jax.numpy as jnp
 from core.gemma_forward import (
     Params,
     RMSNorm,
+    _model_prefix,
     attnHead,
     calc_qkv,
+    config,
     extract_block_params,
+    get_gemma3_layer_types,
     postAttn,
 )
+
+
+def group_attention_single(
+    Ks: jax.Array,
+    Vs: jax.Array,
+    Qss: jax.Array,
+    pos: jax.Array,
+    is_local_attn: jax.Array,
+) -> jax.Array:
+    """
+    Group attention for a single token and a single KV head group.
+    """
+    Qs = Qss[:, None, :]  # (num_queries_per_group, 1, d_kvq)
+    pos_array = jnp.array([pos])
+    xs = jax.vmap(attnHead, in_axes=(None, None, 0, None, None))(
+        Ks, Vs, Qs, pos_array, is_local_attn
+    )
+    xs = xs[:, 0, :]  # (num_queries_per_group, d_kvq)
+    return jnp.reshape(xs, (config.num_queries_per_group * config.d_kvq,))
 
 
 def Block_KV_cached(inits, scans) -> jax.Array:
@@ -51,15 +73,13 @@ def Block_KV_cached(inits, scans) -> jax.Array:
     Vs = Vs_cached.at[pos].set(V_new)
 
     # COMMUNICATION WITH OTHER TOKENS
-    # first we go one level down to parallelize over the four Qs
-    Qs = jnp.expand_dims(Qs, axis=0)  # (1, 4, 256)
-    Qs = jnp.transpose(Qs, (1, 0, 2))  # (4, 1, 256) - head dimension should be first
-
-    pos_array = jnp.expand_dims(pos, axis=0)
-    x = jax.vmap(attnHead, in_axes=(None, None, 0, None, None))(
-        Ks, Vs, Qs, pos_array, is_local_attn
-    )
-    x = jnp.reshape(x, (4 * 256))  # concat heads and remove sequence dim
+    x = jax.vmap(
+        group_attention_single,
+        in_axes=(1, 1, 0, None, None),
+    )(Ks, Vs, Qs, pos, is_local_attn)
+    x = jnp.reshape(
+        x, (config.num_attention_heads * config.d_kvq,)
+    )  # concat heads
 
     x = postAttn(x, x_og, block_params)
 
@@ -77,33 +97,36 @@ def forward_single(
     positional embedding.
     Returns predicted next token as well as updated K,V cache.
     """
+    model_prefix = _model_prefix(params)
+
     # embed the token
-    x = params["model.embed_tokens.weight"][x]
+    x = params[f"{model_prefix}embed_tokens.weight"][x]
 
     # normalize according to Gemma reference implementation
-    x = jnp.sqrt(1152) * x
+    x = jnp.sqrt(config.d_model) * x
 
     # single position should be wrapped in array to not confuse later vmaps
     pos = jnp.array(pos)
 
     # BLOCKS
-    # Create the pattern list based on the config
-    # 26 layers total: (5 local, 1 global) * 4 + 2 local
-    layer_types = (["local"] * 5 + ["global"]) * 4 + ["local"] * 2
-    is_local_attn = jnp.array(
-        [t == "local" for t in layer_types]
-    )  # shape (26,), [1,1...,1,1]
+    # Local/global attention pattern for Gemma 3
+    is_local_attn = get_gemma3_layer_types(config.num_layers)
     (x, _), (Ks_cached, Vs_cached) = jax.lax.scan(
         Block_KV_cached,
         (x, pos),
-        (extract_block_params(params), is_local_attn, Ks_cached, Vs_cached),
+        (
+            extract_block_params(params, model_prefix),
+            is_local_attn,
+            Ks_cached,
+            Vs_cached,
+        ),
     )
 
     # final norm
-    x = RMSNorm(x, params["model.norm.weight"])
+    x = RMSNorm(x, params[f"{model_prefix}norm.weight"])
 
     # map to logits
-    x = params["model.embed_tokens.weight"] @ x
+    x = params[f"{model_prefix}embed_tokens.weight"] @ x
 
     return x, Ks_cached, Vs_cached
 
@@ -118,8 +141,24 @@ def get_KV(
 
     assert cache_size >= n
 
-    K_cache = jnp.zeros((26, cache_size, 256), dtype=jnp.bfloat16)
-    V_cache = jnp.zeros((26, cache_size, 256), dtype=jnp.bfloat16)
+    K_cache = jnp.zeros(
+        (
+            config.num_layers,
+            cache_size,
+            config.num_key_value_heads,
+            config.head_dim,
+        ),
+        dtype=jnp.bfloat16,
+    )
+    V_cache = jnp.zeros(
+        (
+            config.num_layers,
+            cache_size,
+            config.num_key_value_heads,
+            config.d_kvq,
+        ),
+        dtype=jnp.bfloat16,
+    )
 
     def forward_single_scanable(carry, scans):
         Ks_cached, Vs_cached = carry
@@ -142,8 +181,8 @@ def main() -> None:
     from utils.inspect_weights import load_weights_as_dict
     from utils.tokenize_text import tokenize_text, detokenize_ids
 
-    print("Loading weights from data/gemma-3-1b/model_stacked_pt.safetensors...")
-    params = load_weights_as_dict("data/gemma-3-1b/model_stacked_pt.safetensors")
+    print("Loading weights from data/gemma-3-27b/model_stacked_pt.safetensors...")
+    params = load_weights_as_dict("data/gemma-3-27b/model_stacked_pt.safetensors")
     print("Weights loaded.")
 
     prompt = "The capital of France is Paris. The capital of Germany is"
@@ -157,13 +196,19 @@ def main() -> None:
     print(f"Tokens: {tokens}")
 
     # Initialize cache
-    num_layers = 26
-    head_dim = 256
-    max_seq_len = 1024
+    num_layers = config.num_layers
+    head_dim = config.head_dim
+    max_seq_len = config.sliding_window
 
     # Initialize with fixed size
-    Ks_cached = jnp.zeros((num_layers, max_seq_len, head_dim), dtype=jnp.bfloat16)
-    Vs_cached = jnp.zeros((num_layers, max_seq_len, head_dim), dtype=jnp.bfloat16)
+    Ks_cached = jnp.zeros(
+        (num_layers, max_seq_len, config.num_key_value_heads, head_dim),
+        dtype=jnp.bfloat16,
+    )
+    Vs_cached = jnp.zeros(
+        (num_layers, max_seq_len, config.num_key_value_heads, config.d_kvq),
+        dtype=jnp.bfloat16,
+    )
 
     print("Processing prompt (prefill)...")
     logits = None
