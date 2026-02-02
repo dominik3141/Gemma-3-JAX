@@ -253,7 +253,7 @@ def Block(xs: jax.Array, scans) -> jax.Array:
     # we go onto the level of individual groups
     xs = jax.vmap(
         group_attention,
-        in_axes=(None, 0, 0, 0, None, None, None),
+        in_axes=(None, 1, 1, 1, None, None, None),
     )(
         xs,
         Kss,
@@ -373,6 +373,7 @@ def main():
     xs = forward(xs, params)
 
     return xs
+
 
 if __name__ == "__main__":
     print(main())
