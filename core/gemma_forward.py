@@ -252,13 +252,14 @@ def Block(xs: jax.Array, scans) -> jax.Array:
     """
     # we go onto the level of individual groups
     xs = jax.vmap(
-        partial(group_attention, sequence_len=sequence_len),
-        in_axes=(None, 0, 0, 0, None, None),
+        group_attention,
+        in_axes=(None, 0, 0, 0, None, None, None),
     )(
         xs,
         Kss,
         Vss,
         Qsss,
+        sequence_len,
         is_local_attn,
         pos,
     )
