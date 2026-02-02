@@ -140,7 +140,7 @@ def get_KV(
 def main() -> None:
     """Test function for forward_single with actual generation."""
     from utils.inspect_weights import load_weights_as_dict
-    from utils.tokenize import tokenize_text, detokenize_ids
+    from utils.tokenize_text import tokenize_text, detokenize_ids
 
     print("Loading weights from data/gemma-3-1b/model_stacked_pt.safetensors...")
     params = load_weights_as_dict("data/gemma-3-1b/model_stacked_pt.safetensors")

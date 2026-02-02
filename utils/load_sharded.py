@@ -2,6 +2,7 @@ import os
 import json
 import re
 import typing
+
 import jax
 import jax.numpy as jnp
 import numpy
@@ -235,7 +236,8 @@ if __name__ == "__main__":
     mesh = jax.sharding.Mesh(devices, axis_names=("model",))
     print(f"Device mesh ready: {len(devices)} devices", flush=True)
     
-    GCS_PATH = "data/gemma-3-27b"
+    # Test-only: read from local SSD copy.
+    GCS_PATH = "data/gemma-3-27b-local"
     max_layers_env = os.getenv("MAX_LAYERS")
     max_layers = int(max_layers_env) if max_layers_env else None
     timed_subset = os.getenv("TIMED_SUBSET") is not None

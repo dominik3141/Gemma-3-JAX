@@ -35,7 +35,7 @@ import optax
 from core.gemma_forward import Params, forward
 from core.gemma_forward_inference import forward_single, get_KV
 from utils.inspect_weights import load_weights_as_dict
-from utils.tokenize import tokenize_text, detokenize_ids
+from utils.tokenize_text import tokenize_text, detokenize_ids
 import functools
 
 
