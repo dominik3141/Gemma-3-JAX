@@ -19,6 +19,7 @@ config = SimpleNamespace(
     num_layers=62,
     d_model=5376,
     d_kvq=128,
+    head_dim=128,
     d_mlp=21504,
     sliding_window=1024,
 )
@@ -262,7 +263,7 @@ def Block(xs: jax.Array, scans) -> jax.Array:
     )
     xs = jnp.transpose(xs, (1, 0, 2))
     xs = jnp.reshape(
-        xs, sequence_len, config.num_attn_heads * config.d_kvq
+        xs, (sequence_len, config.num_attention_heads * config.d_kvq)
     )  # concat heads
 
     xs = jax.vmap(postAttn, in_axes=(0, 0, None))(xs, xs_og, block_params)
@@ -270,12 +271,21 @@ def Block(xs: jax.Array, scans) -> jax.Array:
     return xs, None
 
 
-def extract_block_params(params: Params) -> Params:
+def _model_prefix(params: Params) -> str:
+    if "language_model.model.embed_tokens.weight" in params:
+        return "language_model.model."
+    if "model.embed_tokens.weight" in params:
+        return "model."
+    raise KeyError("Missing embed_tokens.weight in params (model prefix not found).")
+
+
+def extract_block_params(params: Params, prefix: str) -> Params:
     block_params = {}
+    layer_prefix = f"{prefix}layers_stacked."
 
     for key, val in params.items():
-        if key.startswith("model.layers_stacked"):
-            prefix, suffix = key.split("model.layers_stacked.")
+        if key.startswith(layer_prefix):
+            _, suffix = key.split(layer_prefix, 1)
             block_params[suffix] = val
 
     return block_params
@@ -326,8 +336,10 @@ def forward(xs: jax.Array, params: Params) -> jax.Array:
     padding_tokens = max(0, 1024 - input_length)
     xs = jnp.concatenate([xs, jnp.zeros_like(xs, shape=(padding_tokens,))])
 
+    model_prefix = _model_prefix(params)
+
     # embedding the tokens
-    xs = params["model.embed_tokens.weight"][xs]
+    xs = params[f"{model_prefix}embed_tokens.weight"][xs]
 
     # normalize according to Gemma reference implementation
     xs = jnp.sqrt(config.d_model) * xs
@@ -335,16 +347,18 @@ def forward(xs: jax.Array, params: Params) -> jax.Array:
     # BLOCKS
     # Generate the pattern list based on the 5:1 interleaving rule
     is_local_attn = get_gemma3_layer_types(config.num_layers)
-    xs, _ = jax.lax.scan(Block, xs, (extract_block_params(params), is_local_attn))
+    xs, _ = jax.lax.scan(
+        Block, xs, (extract_block_params(params, model_prefix), is_local_attn)
+    )
 
     # remove padding again (to save memory)
     xs = xs[:input_length]
 
     # final norm
-    xs = jax.vmap(RMSNorm, in_axes=(0, None))(xs, params["model.norm.weight"])
+    xs = jax.vmap(RMSNorm, in_axes=(0, None))(xs, params[f"{model_prefix}norm.weight"])
 
     # map to logits
-    xs = xs @ params["model.embed_tokens.weight"].T
+    xs = xs @ params[f"{model_prefix}embed_tokens.weight"].T
 
     return xs
 
