@@ -45,6 +45,18 @@ def run(cmd, check=True, shell=False):
     subprocess.run(cmd, check=check, shell=shell)
 
 
+def _gcsfuse_supports(flag: str) -> bool:
+    """Check if gcsfuse supports a given flag name (e.g. --metadata-cache-ttl-secs)."""
+    try:
+        result = subprocess.run(
+            ["gcsfuse", "--help"], capture_output=True, text=True, check=False
+        )
+    except Exception:
+        return False
+    output = (result.stdout or "") + (result.stderr or "")
+    return flag in output
+
+
 def setup_git():
     print("--- Setting up Git ---")
     run(["git", "config", "--global", "user.name", GIT_USER_NAME], check=False)
@@ -173,7 +185,14 @@ def mount_bucket(bucket: str, mount_dir: str, only_dir=None, extra_flags=None) -
 
     cmd = ["gcsfuse", "--implicit-dirs"]
     if extra_flags:
-        cmd.extend(extra_flags)
+        filtered_flags = []
+        for flag in extra_flags:
+            flag_name = flag.split("=", 1)[0]
+            if flag_name.startswith("--") and not _gcsfuse_supports(flag_name):
+                print(f"--- Skipping unsupported gcsfuse flag: {flag} ---")
+                continue
+            filtered_flags.append(flag)
+        cmd.extend(filtered_flags)
     if only_dir:
         cmd.extend(["--only-dir", only_dir])
     cmd.extend([bucket, mount_dir])
