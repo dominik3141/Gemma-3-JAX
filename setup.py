@@ -212,7 +212,9 @@ def mount_weights(model_size: str, cold_copy: bool = False):
     ]
 
     if cold_copy:
-        print(f"--- Cold copy requested: remounting {mount_dir} with caches disabled ---")
+        print(
+            f"--- Cold copy requested: remounting {mount_dir} with caches disabled ---"
+        )
         unmount_bucket(mount_dir)
         if only_dir:
             print(f"--- Mounting {label} weights from gs://{bucket}/{only_dir} ---")
@@ -334,7 +336,7 @@ def copy_weights_to_local(model_size: str) -> None:
 
     print(
         f"--- Copying weights to local SSD: {local_dir} "
-        f"({total_bytes / (1024 ** 3):.2f} GiB) ---"
+        f"({total_bytes / (1024**3):.2f} GiB) ---"
     )
     if iface:
         print(f"--- Monitoring network on {iface} ---")
@@ -346,7 +348,7 @@ def copy_weights_to_local(model_size: str) -> None:
 
     start = time.perf_counter()
     copied = 0
-    progress_step = 5 * 1024 ** 3
+    progress_step = 5 * 1024**3
     next_progress = progress_step
 
     for src_path, dst_path in files:
@@ -356,8 +358,8 @@ def copy_weights_to_local(model_size: str) -> None:
         if copied >= next_progress:
             elapsed = time.perf_counter() - start
             print(
-                f"[copy] {copied / (1024 ** 3):.2f} / "
-                f"{total_bytes / (1024 ** 3):.2f} GiB in {elapsed:.1f}s",
+                f"[copy] {copied / (1024**3):.2f} / "
+                f"{total_bytes / (1024**3):.2f} GiB in {elapsed:.1f}s",
                 flush=True,
             )
             next_progress += progress_step

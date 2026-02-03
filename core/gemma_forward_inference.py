@@ -77,9 +77,7 @@ def Block_KV_cached(inits, scans) -> jax.Array:
         group_attention_single,
         in_axes=(1, 1, 0, None, None),
     )(Ks, Vs, Qs, pos, is_local_attn)
-    x = jnp.reshape(
-        x, (config.num_attention_heads * config.d_kvq,)
-    )  # concat heads
+    x = jnp.reshape(x, (config.num_attention_heads * config.d_kvq,))  # concat heads
 
     x = postAttn(x, x_og, block_params)
 

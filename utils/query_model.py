@@ -9,7 +9,6 @@ from __future__ import annotations
 import argparse
 import os
 import shutil
-import sys
 import time
 
 import jax
@@ -45,8 +44,7 @@ def _ensure_tokenizer() -> None:
         return
 
     raise FileNotFoundError(
-        f"Tokenizer not found at {target}. "
-        f"Expected alt at {alt} is also missing."
+        f"Tokenizer not found at {target}. Expected alt at {alt} is also missing."
     )
 
 
@@ -92,7 +90,7 @@ def main() -> int:
         logits, Ks, Vs = forward_single(jnp.array(tok), params, i, Ks, Vs)
         if args.log_every and (i + 1) % args.log_every == 0:
             dt = time.time() - t0
-            print(f"[prefill] {i+1}/{len(tokens)} ({dt:.1f}s)", flush=True)
+            print(f"[prefill] {i + 1}/{len(tokens)} ({dt:.1f}s)", flush=True)
 
     prefill_time = time.time() - t0
     print(f"[prefill] done in {prefill_time:.2f}s", flush=True)
@@ -108,7 +106,7 @@ def main() -> int:
         pos += 1
 
         if args.log_every and (i + 1) % args.log_every == 0:
-            print(f"[generate] {i+1}/{args.max_new_tokens}", flush=True)
+            print(f"[generate] {i + 1}/{args.max_new_tokens}", flush=True)
 
         if args.stop_on:
             text = detokenize_ids(tokens + generated)
