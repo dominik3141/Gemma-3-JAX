@@ -559,30 +559,37 @@ from utils.save_params import save_params
 def main():
     key = jax.random.PRNGKey(42)
     mesh = jax.sharding.Mesh(jax.devices(), axis_names=("model",))
-    params = load_stacked_sharded_model("data/gemma-3-27b-local", mesh)
+    params = load_stacked_sharded_model("data/gemma-3-27b", mesh)
 
     # initial adam state
     optimizer_state = optax.adam(LEARNING_RATE).init(params)
 
     params_ref = params
     i = 0
-    while True:
-        params, loss, format_pct, correct_pct, optimizer_state = train_loop(
-            key, params, params_ref, optimizer_state
-        )
-        key, _ = jax.random.split(key)
-        print(
-            f"{i}, Loss: {loss}, Format: {format_pct * 100:.2f}%, Correct: {correct_pct * 100:.2f}%"
-        )
-        i += 1
+    try:
+        while True:
+            params, loss, format_pct, correct_pct, optimizer_state = train_loop(
+                key, params, params_ref, optimizer_state
+            )
+            key, _ = jax.random.split(key)
+            print(
+                f"{i}, Loss: {loss}, Format: {format_pct * 100:.2f}%, Correct: {correct_pct * 100:.2f}%"
+            )
+            i += 1
 
-        if i % 100 == 0:
-            save_params(params)
-            print("Saved parameters")
+            if i % 100 == 0:
+                save_params(params, upload_to_gcs=False)
+                print("Saved parameters")
 
-        if i % 400 == 0:
-            params_ref = params
-            print("Updated reference parameters")
+            if i % 400 == 0:
+                params_ref = params
+                print("Updated reference parameters")
+    finally:
+        try:
+            save_params(params, upload_to_gcs=True)
+            print("Uploaded final parameters")
+        except Exception as exc:
+            print(f"Failed to upload final parameters: {exc}")
 
 
 if __name__ == "__main__":

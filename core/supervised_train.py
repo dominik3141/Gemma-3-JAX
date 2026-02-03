@@ -112,9 +112,9 @@ def main(num_batches=100):
     print("XLA returned control")
     print(losses)
 
-    # Save params to GCS (defaults to project bucket if env not set)
+    # Save params locally (optionally upload to GCS)
     # from utils.save_params import save_params
 
-    # save_params(params)
+    # save_params(params, upload_to_gcs=False)
 
     return params

@@ -36,7 +36,7 @@ def _ensure_tokenizer() -> None:
     if os.path.exists(target):
         return
 
-    alt = "data/gemma-3-27b-local/tokenizer.model"
+    alt = "data/gemma-3-27b/tokenizer.model"
     if os.path.exists(alt):
         os.makedirs(os.path.dirname(target), exist_ok=True)
         shutil.copy(alt, target)
@@ -53,7 +53,7 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--prompt", type=str, default=DEFAULT_PROMPT)
     parser.add_argument("--max-new-tokens", type=int, default=10)
     parser.add_argument("--log-every", type=int, default=64)
-    parser.add_argument("--weights-dir", type=str, default="data/gemma-3-27b-local")
+    parser.add_argument("--weights-dir", type=str, default="data/gemma-3-27b")
     parser.add_argument("--cache-size", type=int, default=0)
     parser.add_argument("--stop-on", type=str, default="")
     return parser.parse_args()

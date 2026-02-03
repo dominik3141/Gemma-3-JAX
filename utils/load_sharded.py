@@ -248,7 +248,7 @@ if __name__ == "__main__":
     print(f"Device mesh ready: {len(devices)} devices", flush=True)
 
     # Test-only: read from local SSD copy.
-    GCS_PATH = "data/gemma-3-27b-local"
+    GCS_PATH = "data/gemma-3-27b"
     max_layers_env = os.getenv("MAX_LAYERS")
     max_layers = int(max_layers_env) if max_layers_env else None
     timed_subset = os.getenv("TIMED_SUBSET") is not None
