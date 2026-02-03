@@ -34,7 +34,7 @@ import jax.numpy as jnp
 import optax
 from core.gemma_forward import Params, forward
 from core.gemma_forward_inference import forward_single, get_KV
-from utils.inspect_weights import load_weights_as_dict
+from utils.load_sharded import load_stacked_sharded_model
 from utils.tokenize_text import tokenize_text, detokenize_ids
 import functools
 
@@ -558,7 +558,8 @@ from utils.save_params import save_params
 
 def main():
     key = jax.random.PRNGKey(42)
-    params = load_weights_as_dict("data/gemma-3-1b/model_stacked_pt.safetensors")
+    mesh = jax.sharding.Mesh(jax.devices(), axis_names=("model",))
+    params = load_stacked_sharded_model("data/gemma-3-27b-local", mesh)
 
     # initial adam state
     optimizer_state = optax.adam(LEARNING_RATE).init(params)
