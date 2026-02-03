@@ -123,6 +123,7 @@ def load_stacked_sharded_model(
     max_layers: int | None = None,
     include_stacked: bool = True,
     include_global: bool = True,
+    allowed_prefixes: tuple[str, ...] | None = None,
 ) -> dict[str, jax.Array]:
     
     index_path = os.path.join(model_path, "model.safetensors.index.json")
@@ -130,6 +131,10 @@ def load_stacked_sharded_model(
         index_data = json.load(f)
     
     weight_map = index_data["weight_map"]
+    if allowed_prefixes is not None:
+        weight_map = {
+            k: v for k, v in weight_map.items() if k.startswith(allowed_prefixes)
+        }
     
     # Robust Regex
     layer_pattern = re.compile(r"^(.*?)layers\.(\d+)\.(.+)$")
@@ -141,10 +146,14 @@ def load_stacked_sharded_model(
         match = layer_pattern.match(key)
         if match:
             prefix = match.group(1)
+            if allowed_prefixes is not None and not prefix.startswith(allowed_prefixes):
+                continue
             idx = int(match.group(2))
             suffix = match.group(3)
             stacks[prefix][suffix].add(idx)
         else:
+            if allowed_prefixes is not None and not key.startswith(allowed_prefixes):
+                continue
             global_weights[key] = filename
             
     print(f"Detected {len(stacks)} stack groups (e.g. language_model, vision_tower).")
