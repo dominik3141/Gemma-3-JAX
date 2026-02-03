@@ -94,9 +94,13 @@ def main() -> int:
             dt = time.time() - t0
             print(f"[prefill] {i+1}/{len(tokens)} ({dt:.1f}s)", flush=True)
 
+    prefill_time = time.time() - t0
+    print(f"[prefill] done in {prefill_time:.2f}s", flush=True)
+
     print("[generate] ...", flush=True)
     generated: list[int] = []
     pos = len(tokens)
+    gen_start = time.time()
     for i in range(args.max_new_tokens):
         next_token = int(jnp.argmax(logits))
         generated.append(next_token)
@@ -110,6 +114,9 @@ def main() -> int:
             text = detokenize_ids(tokens + generated)
             if args.stop_on in text:
                 break
+
+    gen_time = time.time() - gen_start
+    print(f"[generate] done in {gen_time:.2f}s", flush=True)
 
     out = detokenize_ids(tokens + generated)
     print(out)
