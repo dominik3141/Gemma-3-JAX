@@ -17,12 +17,14 @@ def _configure_tpu_watchdog(timeout_seconds: int = 600, disable: bool = True) ->
     flags = []
     if disable:
         flags.append("--megascale_enable_watchdog=false")
+        flags.append("--threadmanager_overseer_enable_watchdog=false")
     if timeout_seconds > 0:
         timeout_value = f"{timeout_seconds}s"
         flags.append(
             f"--megascale_callback_registry_watchdog_timeout={timeout_value}"
         )
         flags.append(f"--megascale_graph_executor_watchdog_timeout={timeout_value}")
+        flags.append(f"--threadmanager_overseer_watchdog_s={timeout_seconds}")
 
     if not flags:
         return
