@@ -67,11 +67,19 @@ def main() -> None:
     host_params, sharding_specs = load_stacked_sharded_model_host(
         args.weights_dir, max_layers=args.max_layers
     )
+    layer_key = next(
+        k for k in host_params.keys() if "layers_stacked" in k
+    )
+    num_layers = host_params[layer_key].shape[0]
     print("Host load complete. Initializing TPU...", flush=True)
 
     import jax
     import optax
     from core import rl as rl_mod
+    from core import gemma_forward, gemma_forward_inference
+
+    gemma_forward.config.num_layers = num_layers
+    gemma_forward_inference.config.num_layers = num_layers
 
     print("Transferring weights to TPU...", flush=True)
     params, _mesh = _device_put_with_sharding(host_params, sharding_specs)
