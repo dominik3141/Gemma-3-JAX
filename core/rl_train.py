@@ -63,15 +63,19 @@ def main() -> None:
 
     _configure_tpu_watchdog(600, disable=True)
 
+    print("Loading weights on host...", flush=True)
     host_params, sharding_specs = load_stacked_sharded_model_host(
         args.weights_dir, max_layers=args.max_layers
     )
+    print("Host load complete. Initializing TPU...", flush=True)
 
     import jax
     import optax
     from core import rl as rl_mod
 
+    print("Transferring weights to TPU...", flush=True)
     params, _mesh = _device_put_with_sharding(host_params, sharding_specs)
+    print("Device transfer complete. Starting training...", flush=True)
 
     key = jax.random.PRNGKey(42)
     optimizer_state = optax.adam(rl_mod.LEARNING_RATE).init(params)
