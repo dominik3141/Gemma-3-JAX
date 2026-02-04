@@ -29,6 +29,7 @@ LEARNING_RATE = (
 import re
 import math
 import random
+import numpy as np
 import jax
 import jax.numpy as jnp
 import optax
@@ -259,6 +260,96 @@ def reward_fn(
         output_tokens,
         int_to_radicate,
         vmap_method="sequential",
+    )
+
+
+def compute_rewards_host(
+    group_tokens: np.ndarray, int_to_radicate: int
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    rewards = []
+    format_scores = []
+    correctness_scores = []
+    end_positions = []
+
+    for tokens in group_tokens:
+        reward, format_score, correctness_score, end_pos = _impure_reward_fn(
+            tokens, int_to_radicate
+        )
+        rewards.append(reward)
+        format_scores.append(format_score)
+        correctness_scores.append(correctness_score)
+        end_positions.append(end_pos)
+
+    return (
+        np.asarray(rewards, dtype=np.float32),
+        np.asarray(format_scores, dtype=np.float32),
+        np.asarray(correctness_scores, dtype=np.float32),
+        np.asarray(end_positions, dtype=np.int32),
+    )
+
+
+def _loss_from_rewards(
+    params: Params,
+    group: jax.Array,
+    prompt: jax.Array,
+    theta_old_log_probs: jax.Array,
+    params_ref: Params,
+    rewards: jax.Array,
+    end_of_answer_pos_relative: jax.Array,
+) -> jax.Array:
+    prompt_len = prompt.shape[0]
+    end_of_answer_pos = prompt_len + end_of_answer_pos_relative
+
+    theta_log_probs = jax.vmap(log_prop_of_trajectory, in_axes=(None, 0, None))(
+        params, group, prompt
+    )
+
+    theta_old_log_probs = jax.vmap(
+        lambda x: jnp.concatenate([jnp.zeros((prompt_len - 1,)), x])
+    )(theta_old_log_probs)
+
+    theta_log_probs = jax.vmap(mask_fn, in_axes=(0, 0, None))(
+        theta_log_probs, end_of_answer_pos, prompt_len
+    )
+    theta_old_log_probs = jax.vmap(mask_fn, in_axes=(0, 0, None))(
+        theta_old_log_probs, end_of_answer_pos, prompt_len
+    )
+
+    theta_traj_log_probs = jax.vmap(jnp.sum)(theta_log_probs)
+    theta_old_traj_log_probs = jax.vmap(jnp.sum)(theta_old_log_probs)
+
+    advantage = advantage_fn(rewards)
+    ratios = jax.vmap(ratio_fn)(theta_traj_log_probs, theta_old_traj_log_probs)
+
+    unclipped = ratios * advantage
+    clipped = jnp.clip(ratios, 1.0 - EPSILON, 1.0 + EPSILON) * advantage
+
+    kl_penalty = KL(params_ref, group, prompt, theta_log_probs, end_of_answer_pos)
+    kl_penalty = jnp.sum(kl_penalty, axis=-1)
+
+    J_theta = jnp.mean(jnp.minimum(unclipped, clipped) - BETA * kl_penalty)
+
+    return -J_theta
+
+
+@jax.jit
+def loss_and_grads(
+    params: Params,
+    params_ref: Params,
+    group: jax.Array,
+    prompt: jax.Array,
+    theta_old_log_probs: jax.Array,
+    rewards: jax.Array,
+    end_of_answer_pos_relative: jax.Array,
+) -> tuple[jax.Array, Params]:
+    return jax.value_and_grad(_loss_from_rewards)(
+        params,
+        group,
+        prompt,
+        theta_old_log_probs,
+        params_ref,
+        rewards,
+        end_of_answer_pos_relative,
     )
 
 
@@ -553,6 +644,65 @@ def train_loop(
     )
 
 
+def train_loop_host_rewards(
+    key: jax.random.PRNGKey,
+    params: Params,
+    params_ref: Params,
+    optimizer_state: optax.OptState,
+) -> tuple[Params, float, float, float, optax.OptState]:
+    grads_accum = jax.tree_util.tree_map(jnp.zeros_like, params)
+    loss_total = 0.0
+    format_total = 0.0
+    correctness_total = 0.0
+
+    for _ in range(NUM_GROUPS_PER_UPDATE):
+        key, subkey = jax.random.split(key)
+        group, theta_old_log_probs, int_to_radicate, prompt = get_group(
+            subkey, GROUP_SIZE, params
+        )
+
+        group_host = np.asarray(jax.device_get(group))
+        int_host = int(jax.device_get(int_to_radicate))
+
+        rewards, format_scores, correctness_scores, end_pos = compute_rewards_host(
+            group_host, int_host
+        )
+        rewards_dev = jnp.asarray(rewards)
+        end_pos_dev = jnp.asarray(end_pos)
+
+        loss, grads = loss_and_grads(
+            params,
+            params_ref,
+            group,
+            prompt,
+            theta_old_log_probs,
+            rewards_dev,
+            end_pos_dev,
+        )
+
+        grads_accum = jax.tree_util.tree_map(jnp.add, grads_accum, grads)
+        loss_total += float(loss)
+        format_total += float(np.mean(format_scores))
+        correctness_total += float(np.mean(correctness_scores))
+
+    grads_accum = jax.tree_util.tree_map(
+        lambda g: g / NUM_GROUPS_PER_UPDATE, grads_accum
+    )
+
+    grad_updates, new_optimizer_state = optax.adam(LEARNING_RATE).update(
+        grads_accum, optimizer_state, params
+    )
+    new_params = jax.tree_util.tree_map(lambda p, u: p + u, params, grad_updates)
+
+    return (
+        new_params,
+        loss_total / NUM_GROUPS_PER_UPDATE,
+        format_total / NUM_GROUPS_PER_UPDATE,
+        correctness_total / NUM_GROUPS_PER_UPDATE,
+        new_optimizer_state,
+    )
+
+
 from utils.save_params import save_params
 
 
@@ -567,8 +717,8 @@ def main():
     i = 0
     try:
         while True:
-            params, loss, format_pct, correct_pct, optimizer_state = train_loop(
-                key, params, params_ref, optimizer_state
+            params, loss, format_pct, correct_pct, optimizer_state = (
+                train_loop_host_rewards(key, params, params_ref, optimizer_state)
             )
             key, _ = jax.random.split(key)
             print(

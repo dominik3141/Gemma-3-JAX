@@ -53,8 +53,8 @@ def main() -> None:
     i = 0
     try:
         while True:
-            params, loss, format_pct, correct_pct, optimizer_state = rl_mod.train_loop(
-                key, params, params_ref, optimizer_state
+            params, loss, format_pct, correct_pct, optimizer_state = (
+                rl_mod.train_loop_host_rewards(key, params, params_ref, optimizer_state)
             )
             key, _ = jax.random.split(key)
             print(
