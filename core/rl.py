@@ -14,17 +14,31 @@ Plan:
 4.  Backpropagate
 """
 
-MAX_ROOT = 900
-MIN_ROOT = 1
-SAMPLE_TEMP = 1  # as suggested by R1 paper
-GROUP_SIZE = 8  # as suggested by R1 paper
-MAX_RESPONSE_LENGTH = 250
-EPSILON = 0.1
-BETA = 0.001  # as suggested by R1 paper
-NUM_GROUPS_PER_UPDATE = 32  # as suggested by R1 paper
-LEARNING_RATE = (
-    (GROUP_SIZE / 16) * (NUM_GROUPS_PER_UPDATE / 32) * 3e-6
-)  # as suggested by R1 paper
+import os
+
+
+def _env_int(name: str, default: int) -> int:
+    value = os.getenv(name)
+    return int(value) if value else default
+
+
+def _env_float(name: str, default: float) -> float:
+    value = os.getenv(name)
+    return float(value) if value else default
+
+
+MAX_ROOT = _env_int("RL_MAX_ROOT", 900)
+MIN_ROOT = _env_int("RL_MIN_ROOT", 1)
+SAMPLE_TEMP = _env_float("RL_SAMPLE_TEMP", 1.0)  # as suggested by R1 paper
+GROUP_SIZE = _env_int("RL_GROUP_SIZE", 8)  # as suggested by R1 paper
+MAX_RESPONSE_LENGTH = _env_int("RL_MAX_RESPONSE_LENGTH", 250)
+EPSILON = _env_float("RL_EPSILON", 0.1)
+BETA = _env_float("RL_BETA", 0.001)  # as suggested by R1 paper
+NUM_GROUPS_PER_UPDATE = _env_int("RL_NUM_GROUPS_PER_UPDATE", 32)
+LEARNING_RATE = _env_float(
+    "RL_LEARNING_RATE",
+    (GROUP_SIZE / 16) * (NUM_GROUPS_PER_UPDATE / 32) * 3e-6,
+)
 
 import re
 import math
