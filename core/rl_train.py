@@ -37,6 +37,14 @@ def _configure_tpu_watchdog(timeout_seconds: int = 600, disable: bool = True) ->
         os.environ[env_key] = (existing + " " + flag_str).strip()
 
 
+def _configure_tpu_health_check(timeout_ms: int = 600_000) -> None:
+    flag = f"--xla_tpu_health_check_timeout_threshold_ms={timeout_ms}"
+    existing = os.environ.get("LIBTPU_INIT_ARGS", "")
+    if flag in existing:
+        return
+    os.environ["LIBTPU_INIT_ARGS"] = (existing + " " + flag).strip()
+
+
 def _device_put_with_sharding(
     host_params: dict,
     sharding_specs: dict,
@@ -62,6 +70,7 @@ def main() -> None:
     args = _parse_args()
 
     _configure_tpu_watchdog(600, disable=True)
+    _configure_tpu_health_check(600_000)
 
     print("Loading weights on host...", flush=True)
     host_params, sharding_specs = load_stacked_sharded_model_host(
