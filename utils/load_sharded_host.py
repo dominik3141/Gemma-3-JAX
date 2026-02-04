@@ -5,6 +5,7 @@ from collections import defaultdict
 from typing import Iterable
 
 import numpy as np
+import ml_dtypes  # noqa: F401  # ensures bfloat16 support for safetensors
 import safetensors
 
 
