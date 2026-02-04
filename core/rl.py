@@ -115,10 +115,18 @@ def get_prompt(n: int) -> jax.Array:
 
     This guarantees a fixed shape output (112 tokens) and ensures that we don't break the JAX tracer.
     """
-    prefix_str = """A conversation between User and Assistant. The user asks a question, and the Assistant solves it.
+    use_short = os.getenv("RL_SHORT_PROMPT") == "1"
+    if use_short:
+        prefix_str = (
+            "Use <think>...</think> and <answer>...</answer>. "
+            "Answer only the number. User: sqrt("
+        )
+        suffix_str = "). Assistant:"
+    else:
+        prefix_str = """A conversation between User and Assistant. The user asks a question, and the Assistant solves it.
 The assistant first thinks about the reasoning process in the mind and then provides the user with the answer. The reasoning process and answer are enclosed within <think>...</think> and <answer>...</answer> tags, respectively, i.e., <think> reasoning process here </think> <answer> answer here </answer>. The answer should only include the numerical result and nothing else.
 User: Calculate the square root of """
-    suffix_str = " up to three decimal places. Assistant:"
+        suffix_str = " up to three decimal places. Assistant:"
 
     # These tokenizations happen during tracing (constant folding) or eagerly (fast enough)
     prefix_tokens = jnp.array(tokenize_text(prefix_str), dtype=jnp.int32)
