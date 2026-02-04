@@ -34,7 +34,7 @@ import jax.numpy as jnp
 import optax
 from core.gemma_forward import Params, forward
 from core.gemma_forward_inference import forward_single, get_KV
-from utils.load_sharded import load_stacked_sharded_model
+from utils.load_sharded import load_stacked_sharded_model_deferred
 from utils.tokenize_text import tokenize_text, detokenize_ids
 import functools
 
@@ -558,8 +558,7 @@ from utils.save_params import save_params
 
 def main():
     key = jax.random.PRNGKey(42)
-    mesh = jax.sharding.Mesh(jax.devices(), axis_names=("model",))
-    params = load_stacked_sharded_model("data/gemma-3-27b", mesh)
+    params, _ = load_stacked_sharded_model_deferred("data/gemma-3-27b")
 
     # initial adam state
     optimizer_state = optax.adam(LEARNING_RATE).init(params)
