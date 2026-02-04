@@ -1,5 +1,7 @@
 import argparse
 import os
+import pathlib
+import sys
 
 from utils.load_sharded_host import load_stacked_sharded_model_host
 
@@ -39,6 +41,22 @@ def _configure_tpu_watchdog(timeout_seconds: int = 600, disable: bool = True) ->
 
 def _configure_tpu_health_check(timeout_ms: int = 600_000) -> None:
     flag = f"--xla_tpu_health_check_timeout_threshold_ms={timeout_ms}"
+    libtpu_path = (
+        pathlib.Path(sys.prefix)
+        / "lib"
+        / f"python{sys.version_info.major}.{sys.version_info.minor}"
+        / "site-packages"
+        / "libtpu"
+        / "libtpu.so"
+    )
+    if not libtpu_path.exists():
+        return
+    try:
+        data = libtpu_path.read_bytes()
+    except OSError:
+        return
+    if flag.encode() not in data:
+        return
     existing = os.environ.get("LIBTPU_INIT_ARGS", "")
     if flag in existing:
         return
