@@ -1,4 +1,5 @@
 import argparse
+import os
 
 from utils.load_sharded_host import load_stacked_sharded_model_host
 
@@ -10,6 +11,17 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--weights-dir", default="data/gemma-3-27b")
     parser.add_argument("--max-layers", type=int, default=None)
     return parser.parse_args()
+
+
+def _ensure_tpu_watchdog_timeout(seconds: int) -> None:
+    flags = (
+        f"--megascale_callback_registry_watchdog_timeout={seconds} "
+        f"--megascale_graph_executor_watchdog_timeout={seconds}"
+    )
+    existing = os.environ.get("TPU_INIT_ARGS", "")
+    if flags in existing:
+        return
+    os.environ["TPU_INIT_ARGS"] = (existing + " " + flags).strip()
 
 
 def _device_put_with_sharding(
@@ -35,6 +47,8 @@ def _device_put_with_sharding(
 
 def main() -> None:
     args = _parse_args()
+
+    _ensure_tpu_watchdog_timeout(600)
 
     host_params, sharding_specs = load_stacked_sharded_model_host(
         args.weights_dir, max_layers=args.max_layers
