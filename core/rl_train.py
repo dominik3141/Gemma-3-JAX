@@ -13,15 +13,23 @@ def _parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def _ensure_tpu_watchdog_timeout(seconds: int) -> None:
-    flags = (
-        f"--megascale_callback_registry_watchdog_timeout={seconds} "
-        f"--megascale_graph_executor_watchdog_timeout={seconds}"
-    )
-    existing = os.environ.get("TPU_INIT_ARGS", "")
-    if flags in existing:
+def _configure_tpu_watchdog(timeout_seconds: int = 600, disable: bool = True) -> None:
+    flags = []
+    if disable:
+        flags.append("--megascale_enable_watchdog=false")
+    if timeout_seconds > 0:
+        flags.append(f"--megascale_callback_registry_watchdog_timeout={timeout_seconds}")
+        flags.append(f"--megascale_graph_executor_watchdog_timeout={timeout_seconds}")
+
+    if not flags:
         return
-    os.environ["TPU_INIT_ARGS"] = (existing + " " + flags).strip()
+
+    flag_str = " ".join(flags)
+    for env_key in ("TPU_INIT_ARGS", "LIBTPU_INIT_ARGS"):
+        existing = os.environ.get(env_key, "")
+        if flag_str in existing:
+            continue
+        os.environ[env_key] = (existing + " " + flag_str).strip()
 
 
 def _device_put_with_sharding(
@@ -48,7 +56,7 @@ def _device_put_with_sharding(
 def main() -> None:
     args = _parse_args()
 
-    _ensure_tpu_watchdog_timeout(600)
+    _configure_tpu_watchdog(600, disable=True)
 
     host_params, sharding_specs = load_stacked_sharded_model_host(
         args.weights_dir, max_layers=args.max_layers
