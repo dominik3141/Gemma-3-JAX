@@ -16,7 +16,7 @@ from safetensors.numpy import save_file
 from core.gemma_forward import Params
 
 CHECKPOINT_ROOT = "checkpoints"
-GCS_UPLOAD_PREFIX = "gs://gemma-3-checkpoints-482802/checkpoints"
+GCS_UPLOAD_PREFIX = "gs://gemma-tpu-weights-us-west4-482802/checkpoints"
 SHARD_THRESHOLD_BYTES = 4 * 1024**3
 
 
