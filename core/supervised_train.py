@@ -69,13 +69,12 @@ def main(num_batches=100):
     key = jax.random.key(42)
 
     print("Loading weights...")
+
     def _make_mesh() -> Mesh:
         num_devices: int = jax.device_count()
         model_axis_size = min(num_devices, 2)
         batch_axis_size = num_devices // model_axis_size
-        device_mesh = mesh_utils.create_device_mesh(
-            (batch_axis_size, model_axis_size)
-        )
+        device_mesh = mesh_utils.create_device_mesh((batch_axis_size, model_axis_size))
         return Mesh(device_mesh, axis_names=("batch", "model"))
 
     params, mesh = load_params(
