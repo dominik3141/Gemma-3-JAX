@@ -39,6 +39,7 @@ from core.gemma_forward_inference import forward_single, get_KV
 from utils.gcp import log_text_async
 from utils.params_io import DEFAULT_ORBAX_CHECKPOINT, load_params, save_params
 from utils.tokenize_text import tokenize_text, detokenize_ids
+import utils.wandb_logging as wandb_logging
 import functools
 
 HOSTNAME = socket.gethostname()
@@ -174,6 +175,8 @@ def _impure_reward_fn(
     format_score = 0.0
     correctness_score = 0.0
     reward = 0.0
+    prediction = None
+    target = None
 
     # 1. Strict Tag Count Check
     if (
@@ -246,6 +249,26 @@ def _impure_reward_fn(
                 f"Output:\n{text}\n" + "-" * 80
             )
             log_text_async("training_samples", message)
+
+            abs_error = None
+            if prediction is not None and target is not None:
+                abs_error = abs(prediction - target)
+
+            wandb_logging.log_sample(
+                {
+                    "log_type": log_type,
+                    "target": math.sqrt(float(int_to_radicate)),
+                    "reward": reward,
+                    "format_score": format_score,
+                    "correctness_score": correctness_score,
+                    "prediction": prediction,
+                    "abs_error": abs_error,
+                    "output_text": text,
+                    "host": HOSTNAME,
+                    "pid": PID,
+                    "process_index": process_index,
+                }
+            )
         except Exception as e:
             print(f"Error logging training sample: {e}")
 
@@ -503,7 +526,12 @@ def get_group(
 
 def train_inner_loop(
     key: jax.random.PRNGKey, params: Params, params_ref: Params
-) -> tuple[jax.Array, jax.Array, jax.Array, jax.Array]:
+) -> tuple[
+    jax.Array,
+    jax.Array,
+    jax.Array,
+    jax.Array,
+]:
     # sample a group
     grp, theta_old_log_probs, int_to_radicate, prompt = get_group(
         key, GROUP_SIZE, params
@@ -514,7 +542,12 @@ def train_inner_loop(
         objective_function, has_aux=True
     )(params, grp, int_to_radicate, prompt, theta_old_log_probs, params_ref)
 
-    return loss, mean_format, mean_correctness, grads
+    return (
+        loss,
+        mean_format,
+        mean_correctness,
+        grads,
+    )
 
 
 @jax.jit
@@ -523,7 +556,13 @@ def train_loop(
     params: Params,
     params_ref: Params,
     optimizer_state: optax.OptState,
-) -> tuple[Params, jax.Array, jax.Array, jax.Array, optax.OptState]:
+) -> tuple[
+    Params,
+    jax.Array,
+    jax.Array,
+    jax.Array,
+    optax.OptState,
+]:
     keys = jax.random.split(key, NUM_GROUPS_PER_UPDATE)
     inner_loop_partial = functools.partial(
         train_inner_loop, params=params, params_ref=params_ref
@@ -572,14 +611,40 @@ def main():
 
     params_ref = params
     i = 0
+    wandb_logging.init_wandb(
+        project="gemma-27b-r1-zero",
+        config={
+            "max_root": MAX_ROOT,
+            "min_root": MIN_ROOT,
+            "sample_temp": SAMPLE_TEMP,
+            "group_size": GROUP_SIZE,
+            "max_response_length": MAX_RESPONSE_LENGTH,
+            "epsilon": EPSILON,
+            "beta": BETA,
+            "num_groups_per_update": NUM_GROUPS_PER_UPDATE,
+            "learning_rate": LEARNING_RATE,
+        },
+    )
     try:
         while True:
+            wandb_logging.set_step(i)
             params, loss, format_pct, correct_pct, optimizer_state = train_loop(
                 key, params, params_ref, optimizer_state
             )
             key, _ = jax.random.split(key)
+            loss, format_pct, correct_pct = jax.device_get(
+                (loss, format_pct, correct_pct)
+            )
             print(
                 f"{i}, Loss: {loss}, Format: {format_pct * 100:.2f}%, Correct: {correct_pct * 100:.2f}%"
+            )
+            wandb_logging.log_metrics(
+                {
+                    "train/loss": float(loss),
+                    "train/format_pct": float(format_pct * 100.0),
+                    "train/correct_pct": float(correct_pct * 100.0),
+                },
+                step=i,
             )
             i += 1
 
@@ -596,6 +661,8 @@ def main():
             print("Uploaded final parameters")
         except Exception as exc:
             print(f"Failed to upload final parameters: {exc}")
+        finally:
+            wandb_logging.finish_wandb()
 
 
 if __name__ == "__main__":
