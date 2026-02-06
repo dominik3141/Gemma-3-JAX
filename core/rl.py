@@ -29,14 +29,20 @@ LEARNING_RATE = (
 import re
 import math
 import random
+import os
+import socket
 import jax
 import jax.numpy as jnp
 import optax
 from core.gemma_forward import Params, forward
 from core.gemma_forward_inference import forward_single, get_KV
+from utils.gcp import log_text_async
 from utils.params_io import DEFAULT_ORBAX_CHECKPOINT, load_params, save_params
 from utils.tokenize_text import tokenize_text, detokenize_ids
 import functools
+
+HOSTNAME = socket.gethostname()
+PID = os.getpid()
 
 
 def sample_with_temp(
@@ -231,16 +237,17 @@ def _impure_reward_fn(
 
     if should_log:
         try:
-            with open("training_samples.txt", "a") as f:
-                f.write(f"Type: {log_type}\n")
-                f.write(f"Target: sqrt({int_to_radicate})\n")
-                f.write(
-                    f"Stats: Reward={reward:.2f}, Format={format_score}, Correct={correctness_score}\n"
-                )
-                f.write(f"Output:\n{text}\n")
-                f.write("-" * 80 + "\n")
+            process_index = jax.process_index()
+            message = (
+                f"Type: {log_type}\n"
+                f"Host: {HOSTNAME} PID: {PID} ProcessIndex: {process_index}\n"
+                f"Target: sqrt({int_to_radicate})\n"
+                f"Stats: Reward={reward:.2f}, Format={format_score}, Correct={correctness_score}\n"
+                f"Output:\n{text}\n" + "-" * 80
+            )
+            log_text_async("training_samples", message)
         except Exception as e:
-            print(f"Error writing to training_samples.txt: {e}")
+            print(f"Error logging training sample: {e}")
 
     return float(reward), float(format_score), float(correctness_score), int(end_pos)
 
