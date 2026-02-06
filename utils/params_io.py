@@ -4,8 +4,10 @@ import uuid
 from typing import Iterable, Tuple, Any
 
 import jax
+import numpy as np
 from jax.sharding import NamedSharding, PartitionSpec
 import orbax.checkpoint as ocp
+from jax.experimental import multihost_utils
 
 
 DEFAULT_ORBAX_CHECKPOINT = (
@@ -169,19 +171,79 @@ def _restore_to_host(
         return ckptr.restore(checkpoint_path, target)
 
 
+def _empty_host_tree(meta_tree: Any) -> dict[str, np.ndarray]:
+    host_tree: dict[str, np.ndarray] = {}
+    for key, meta in _iter_metadata(meta_tree):
+        shape, dtype = _meta_shape_dtype(meta)
+        host_tree[key] = np.zeros(shape, dtype=dtype)
+    return host_tree
+
+
+def _restore_to_host_multihost(
+    ckptr: ocp.StandardCheckpointer,
+    checkpoint_path: str,
+    meta_tree: Any,
+    *,
+    is_source: bool,
+) -> dict[str, np.ndarray]:
+    # Temporary fallback: each host restores directly to CPU memory to avoid
+    # TPU HBM pressure from broadcast_one_to_all.
+    return _restore_to_host(ckptr, checkpoint_path, meta_tree)
+
+
+def _slice_for_host(
+    value: np.ndarray,
+    spec: PartitionSpec,
+    *,
+    host_index: int,
+    host_count: int,
+) -> np.ndarray:
+    axes = tuple(spec)
+    if "model" not in axes or host_count == 1:
+        return value
+    if axes.count("model") > 1:
+        raise ValueError("Multiple 'model' axes not supported in host slicing.")
+    axis = axes.index("model")
+    dim = value.shape[axis]
+    if dim % host_count != 0:
+        raise ValueError(
+            f"Axis {axis} with size {dim} is not divisible by host count {host_count}."
+        )
+    chunk = dim // host_count
+    start = host_index * chunk
+    end = start + chunk
+    slices = [slice(None)] * value.ndim
+    slices[axis] = slice(start, end)
+    return value[tuple(slices)]
+
+
 def _shard_to_mesh(
     params: dict[str, jax.Array],
     mesh: jax.sharding.Mesh,
 ) -> dict[str, jax.Array]:
     sharded: dict[str, jax.Array] = {}
+    is_multihost = jax.process_count() > 1
+    host_index = jax.process_index()
+    host_count = jax.process_count()
     for key, value in params.items():
         is_stacked = _is_layer_key(key)
         name_for_spec = _layer_suffix(key) if is_stacked else key
         spec = get_stacked_sharding_spec(
             name_for_spec, value.ndim, is_stacked=is_stacked
         )
-        sharding = NamedSharding(mesh, spec)
-        sharded[key] = jax.device_put(value, sharding)
+        if is_multihost:
+            local_value = _slice_for_host(
+                np.asarray(value),
+                spec,
+                host_index=host_index,
+                host_count=host_count,
+            )
+            sharded[key] = multihost_utils.host_local_array_to_global_array(
+                local_value, mesh, spec
+            )
+        else:
+            sharding = NamedSharding(mesh, spec)
+            sharded[key] = jax.device_put(value, sharding)
     return sharded
 
 
@@ -197,6 +259,8 @@ def load_params(
     meta_tree = _unwrap_metadata(ckptr.metadata(checkpoint_path))
 
     if host_first:
+        # For now, restore on every host to avoid full-tensor device_put during
+        # multihost broadcast.
         cpu_state = _restore_to_host(ckptr, checkpoint_path, meta_tree)
         if mesh is None:
             if mesh_factory is None:
