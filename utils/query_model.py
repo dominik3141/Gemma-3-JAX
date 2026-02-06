@@ -59,8 +59,7 @@ def main() -> int:
         tokens = [2]
 
     print("[load] weights...", flush=True)
-    mesh = jax.sharding.Mesh(jax.devices(), axis_names=("model",))
-    params = load_params(args.checkpoint, mesh)
+    params = load_params(args.checkpoint)
 
     cache_size = args.cache_size or (len(tokens) + args.max_new_tokens)
     Ks = jnp.zeros(

@@ -555,8 +555,10 @@ def train_loop(
 
 def main():
     key = jax.random.PRNGKey(42)
-    mesh = jax.sharding.Mesh(jax.devices(), axis_names=("model",))
-    params = load_params(DEFAULT_ORBAX_CHECKPOINT, mesh)
+    params = load_params(
+        DEFAULT_ORBAX_CHECKPOINT,
+        mesh_factory=lambda: jax.sharding.Mesh(jax.devices(), axis_names=("model",)),
+    )
 
     # initial adam state
     optimizer_state = optax.adam(LEARNING_RATE).init(params)

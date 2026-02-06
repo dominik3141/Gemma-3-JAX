@@ -368,8 +368,7 @@ def forward(xs: jax.Array, params: Params) -> jax.Array:
 def main():
     from utils.params_io import DEFAULT_ORBAX_CHECKPOINT, load_params
 
-    mesh = jax.sharding.Mesh(jax.devices(), axis_names=("model",))
-    params = load_params(DEFAULT_ORBAX_CHECKPOINT, mesh)
+    params = load_params(DEFAULT_ORBAX_CHECKPOINT)
     xs = jnp.array([2, 4237, 3234, 1293094])
 
     xs = forward(xs, params)

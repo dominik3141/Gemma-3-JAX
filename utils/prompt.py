@@ -165,8 +165,7 @@ def cli_main() -> None:
     template = args.template or ("gemma-instruct" if args.mode == "it" else "plain")
 
     tokenizer = load_tokenizer(args.tokenizer)
-    mesh = jax.sharding.Mesh(jax.devices(), axis_names=("model",))
-    params = load_params(checkpoint_path, mesh)
+    params = load_params(checkpoint_path)
 
     stop_ids: set[int] = set()
     if not args.no_eos_stop:

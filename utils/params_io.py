@@ -134,22 +134,91 @@ def _join_checkpoint_path(root: str, name: str) -> str:
     return f"{root}/{name}"
 
 
-def load_params(checkpoint_path: str, mesh: jax.sharding.Mesh) -> dict[str, jax.Array]:
-    ckptr = ocp.StandardCheckpointer()
-    meta_tree = _unwrap_metadata(ckptr.metadata(checkpoint_path))
-
-    target = {}
+def _build_target(
+    meta_tree: Any,
+    *,
+    mesh: jax.sharding.Mesh | None,
+    sharded: bool,
+) -> dict[str, jax.ShapeDtypeStruct]:
+    target: dict[str, jax.ShapeDtypeStruct] = {}
     for key, meta in _iter_metadata(meta_tree):
         shape, dtype = _meta_shape_dtype(meta)
+        if sharded:
+            if mesh is None:
+                raise ValueError("mesh is required when sharded=True")
+            is_stacked = _is_layer_key(key)
+            name_for_spec = _layer_suffix(key) if is_stacked else key
+            spec = get_stacked_sharding_spec(
+                name_for_spec, len(shape), is_stacked=is_stacked
+            )
+            sharding = NamedSharding(mesh, spec)
+            target[key] = jax.ShapeDtypeStruct(shape, dtype, sharding=sharding)
+        else:
+            target[key] = jax.ShapeDtypeStruct(shape, dtype)
+    return target
+
+
+def _restore_to_host(
+    ckptr: ocp.StandardCheckpointer,
+    checkpoint_path: str,
+    meta_tree: Any,
+) -> dict[str, jax.Array]:
+    cpu_device = jax.devices("cpu")[0]
+    target = _build_target(meta_tree, mesh=None, sharded=False)
+    with jax.default_device(cpu_device):
+        return ckptr.restore(checkpoint_path, target)
+
+
+def _shard_to_mesh(
+    params: dict[str, jax.Array],
+    mesh: jax.sharding.Mesh,
+) -> dict[str, jax.Array]:
+    sharded: dict[str, jax.Array] = {}
+    for key, value in params.items():
         is_stacked = _is_layer_key(key)
         name_for_spec = _layer_suffix(key) if is_stacked else key
         spec = get_stacked_sharding_spec(
-            name_for_spec, len(shape), is_stacked=is_stacked
+            name_for_spec, value.ndim, is_stacked=is_stacked
         )
         sharding = NamedSharding(mesh, spec)
-        target[key] = jax.ShapeDtypeStruct(shape, dtype, sharding=sharding)
+        sharded[key] = jax.device_put(value, sharding)
+    return sharded
 
-    return ckptr.restore(checkpoint_path, target)
+
+def load_params(
+    checkpoint_path: str,
+    mesh: jax.sharding.Mesh | None = None,
+    *,
+    mesh_factory=None,
+    host_first: bool = True,
+    return_mesh: bool = False,
+) -> dict[str, jax.Array] | tuple[dict[str, jax.Array], jax.sharding.Mesh]:
+    ckptr = ocp.StandardCheckpointer()
+    meta_tree = _unwrap_metadata(ckptr.metadata(checkpoint_path))
+
+    if host_first:
+        cpu_state = _restore_to_host(ckptr, checkpoint_path, meta_tree)
+        if mesh is None:
+            if mesh_factory is None:
+                mesh_factory = lambda: jax.sharding.Mesh(
+                    jax.devices(), axis_names=("model",)
+                )
+            mesh = mesh_factory()
+        params = _shard_to_mesh(cpu_state, mesh)
+        del cpu_state
+    else:
+        if mesh is None:
+            if mesh_factory is None:
+                mesh_factory = lambda: jax.sharding.Mesh(
+                    jax.devices(), axis_names=("model",)
+                )
+            mesh = mesh_factory()
+        target = _build_target(meta_tree, mesh=mesh, sharded=True)
+        params = ckptr.restore(checkpoint_path, target)
+
+    if return_mesh:
+        return params, mesh
+    return params
 
 
 def save_params(

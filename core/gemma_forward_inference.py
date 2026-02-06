@@ -180,8 +180,7 @@ def main() -> None:
     from utils.tokenize_text import tokenize_text, detokenize_ids
 
     print("Loading weights from Orbax checkpoint...")
-    mesh = jax.sharding.Mesh(jax.devices(), axis_names=("model",))
-    params = load_params(DEFAULT_ORBAX_CHECKPOINT, mesh)
+    params = load_params(DEFAULT_ORBAX_CHECKPOINT)
     print("Weights loaded.")
 
     prompt = "The capital of France is Paris. The capital of Germany is"
