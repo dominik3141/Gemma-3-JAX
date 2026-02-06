@@ -6,11 +6,13 @@ readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
     "jax>=0.8.2",
+    "orbax-checkpoint>=0.5.16",
+    "tensorstore>=0.1.56",
+    "gcsfs>=2024.10.0",
     "ml-dtypes>=0.5.4",
     "numpy>=2.4.0",
     "optax>=0.2.6",
     "rich>=14.2.0",
-    "safetensors>=0.7.0",
     "sentencepiece>=0.2.1",
     "python-dotenv>=1.0.0",
     "google-cloud-logging>=3.13.0",

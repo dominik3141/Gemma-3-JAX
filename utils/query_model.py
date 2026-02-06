@@ -1,14 +1,13 @@
 #!/usr/bin/env python3
 """
 Minimal text generation helper for Gemma 3 (27B) using the inference forward path.
-Loads sharded weights from local SSD and runs prefill + greedy decoding.
+Loads weights from an Orbax checkpoint and runs prefill + greedy decoding.
 """
 
 from __future__ import annotations
 
 import argparse
 import os
-import shutil
 import time
 
 import jax
@@ -16,7 +15,7 @@ import jax.numpy as jnp
 
 from core.gemma_forward import config
 from core.gemma_forward_inference import forward_single
-from utils.load_sharded import load_stacked_sharded_model
+from utils.params_io import DEFAULT_ORBAX_CHECKPOINT, load_params
 from utils.tokenize_text import detokenize_ids, tokenize_text
 
 
@@ -32,20 +31,10 @@ DEFAULT_PROMPT = (
 
 
 def _ensure_tokenizer() -> None:
-    target = "data/gemma-3-1b/tokenizer.model"
+    target = "data/gemma-3-27b/tokenizer.model"
     if os.path.exists(target):
         return
-
-    alt = "data/gemma-3-27b/tokenizer.model"
-    if os.path.exists(alt):
-        os.makedirs(os.path.dirname(target), exist_ok=True)
-        shutil.copy(alt, target)
-        print(f"[tokenizer] Copied {alt} -> {target}", flush=True)
-        return
-
-    raise FileNotFoundError(
-        f"Tokenizer not found at {target}. Expected alt at {alt} is also missing."
-    )
+    raise FileNotFoundError(f"Tokenizer not found at {target}.")
 
 
 def _parse_args() -> argparse.Namespace:
@@ -53,7 +42,7 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--prompt", type=str, default=DEFAULT_PROMPT)
     parser.add_argument("--max-new-tokens", type=int, default=10)
     parser.add_argument("--log-every", type=int, default=64)
-    parser.add_argument("--weights-dir", type=str, default="data/gemma-3-27b")
+    parser.add_argument("--checkpoint", type=str, default=DEFAULT_ORBAX_CHECKPOINT)
     parser.add_argument("--cache-size", type=int, default=0)
     parser.add_argument("--stop-on", type=str, default="")
     return parser.parse_args()
@@ -71,7 +60,7 @@ def main() -> int:
 
     print("[load] weights...", flush=True)
     mesh = jax.sharding.Mesh(jax.devices(), axis_names=("model",))
-    params = load_stacked_sharded_model(args.weights_dir, mesh)
+    params = load_params(args.checkpoint, mesh)
 
     cache_size = args.cache_size or (len(tokens) + args.max_new_tokens)
     Ks = jnp.zeros(

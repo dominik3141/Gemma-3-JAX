@@ -34,7 +34,7 @@ import jax.numpy as jnp
 import optax
 from core.gemma_forward import Params, forward
 from core.gemma_forward_inference import forward_single, get_KV
-from utils.load_sharded import load_stacked_sharded_model_deferred
+from utils.params_io import DEFAULT_ORBAX_CHECKPOINT, load_params, save_params
 from utils.tokenize_text import tokenize_text, detokenize_ids
 import functools
 
@@ -553,12 +553,10 @@ def train_loop(
     )
 
 
-from utils.save_params import save_params
-
-
 def main():
     key = jax.random.PRNGKey(42)
-    params, _ = load_stacked_sharded_model_deferred("data/gemma-3-27b")
+    mesh = jax.sharding.Mesh(jax.devices(), axis_names=("model",))
+    params = load_params(DEFAULT_ORBAX_CHECKPOINT, mesh)
 
     # initial adam state
     optimizer_state = optax.adam(LEARNING_RATE).init(params)
@@ -577,7 +575,7 @@ def main():
             i += 1
 
             if i % 100 == 0:
-                save_params(params, upload_to_gcs=False)
+                save_params(params, checkpoint_root="checkpoints")
                 print("Saved parameters")
 
             if i % 400 == 0:
@@ -585,7 +583,7 @@ def main():
                 print("Updated reference parameters")
     finally:
         try:
-            save_params(params, upload_to_gcs=True)
+            save_params(params)
             print("Uploaded final parameters")
         except Exception as exc:
             print(f"Failed to upload final parameters: {exc}")

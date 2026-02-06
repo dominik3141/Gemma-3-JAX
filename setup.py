@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
 """
-Zero-dependency setup script for JAX Gemma (1B/27B).
+Zero-dependency setup script for JAX Gemma.
 Runs on Compute Engine environments.
 
 Responsibilities:
 1. Configure Git (for dev/debug).
 2. Install `uv`.
 3. Sync dependencies (`uv sync`).
-4. Download model weights from GCS via `gcloud storage`.
+4. Download tokenizer files from GCS.
 5. Launch `main.py`.
 """
 
@@ -20,19 +20,14 @@ import sys
 # --- Configuration ---
 GIT_USER_NAME = "Dominik Farr"
 GIT_USER_EMAIL = "dominik.farr@icloud.com"
-MODEL_CONFIG = {
-    "1b": {
-        "bucket": "gemma_tmp_12342378236hf",
-        "mount_dir": "data/gemma-3-1b",
-        "sentinel": "model_stacked_pt.safetensors",
-    },
-    "27b": {
-        "bucket": "gemma-3-weights-231d4b",
-        "mount_dir": "data/gemma-3-27b",
-        "only_dir": "gemma-weights",
-        "sentinel": "model.safetensors.index.json",
-    },
-}
+TOKENIZER_ROOT = "gs://gemma-3-weights-231d4b/gemma-weights"
+TOKENIZER_DIR = "data/gemma-3-27b"
+TOKENIZER_FILES = [
+    "tokenizer.model",
+    "tokenizer.json",
+    "tokenizer_config.json",
+]
+TOKENIZER_SENTINEL = os.path.join(TOKENIZER_DIR, "tokenizer.model")
 
 
 def run(cmd, check=True, shell=False):
@@ -116,42 +111,30 @@ def sync_dependencies():
     run(cmd)
 
 
-def ensure_gcloud_storage():
-    if shutil.which("gcloud"):
+def ensure_gsutil() -> None:
+    if shutil.which("gsutil"):
         return
-    print("ERROR: gcloud CLI not found on PATH.")
+    print("ERROR: gsutil not found on PATH.")
     print("Install the Google Cloud SDK and authenticate, then re-run setup.")
     sys.exit(1)
 
 
-def download_weights(model_size: str) -> None:
-    config = MODEL_CONFIG[model_size]
-    mount_dir = config["mount_dir"]
-    sentinel_path = os.path.join(mount_dir, config["sentinel"])
-
-    if os.path.exists(sentinel_path):
-        print(f"--- Weights already present at {sentinel_path} ---")
+def download_tokenizer() -> None:
+    if os.path.exists(TOKENIZER_SENTINEL):
+        print(f"--- Tokenizer already present at {TOKENIZER_SENTINEL} ---")
         return
 
-    ensure_gcloud_storage()
+    ensure_gsutil()
 
-    bucket = config["bucket"]
-    only_dir = config.get("only_dir")
+    os.makedirs(TOKENIZER_DIR, exist_ok=True)
+    for filename in TOKENIZER_FILES:
+        source = f"{TOKENIZER_ROOT}/{filename}"
+        dest = os.path.join(TOKENIZER_DIR, filename)
+        print(f"--- Downloading tokenizer: {source} ---")
+        run(["gsutil", "cp", source, dest])
 
-    if only_dir:
-        # Copy contents so weights land directly under mount_dir.
-        source = f"gs://{bucket}/{only_dir}/*"
-    else:
-        source = f"gs://{bucket}/"
-
-    label = "1B" if model_size == "1b" else "27B"
-    print(f"--- Downloading {label} weights from {source} ---")
-
-    os.makedirs(mount_dir, exist_ok=True)
-    run(["gcloud", "storage", "cp", "-r", source, mount_dir])
-
-    if not os.path.exists(sentinel_path):
-        print(f"ERROR: Expected weights file missing after download: {sentinel_path}")
+    if not os.path.exists(TOKENIZER_SENTINEL):
+        print(f"ERROR: Expected tokenizer file missing: {TOKENIZER_SENTINEL}")
         sys.exit(1)
 
 
@@ -167,11 +150,6 @@ def create_env_file():
 def main():
     parser = argparse.ArgumentParser(description="Setup JAX environment")
     parser.add_argument(
-        "model_size",
-        choices=sorted(MODEL_CONFIG.keys()),
-        help="Model size to download weights for (1b or 27b).",
-    )
-    parser.add_argument(
         "--run-main", action="store_true", help="Launch main.py after setup"
     )
     args, unknown_args = parser.parse_known_args()
@@ -181,7 +159,7 @@ def main():
     setup_git()
     install_uv()
     sync_dependencies()
-    download_weights(args.model_size)
+    download_tokenizer()
 
     if args.run_main:
         print("--- Launching main.py ---")

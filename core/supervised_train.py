@@ -19,7 +19,7 @@ But for now we just always take sequences of the same length to avoid this probl
 import jax
 import jax.numpy as jnp
 from core.gemma_forward import forward
-from utils.inspect_weights import load_weights_as_dict
+from utils.params_io import DEFAULT_ORBAX_CHECKPOINT, load_params
 import optax
 from core.gemma_forward import Params
 from utils.sft_data import get_training_sample
@@ -62,26 +62,11 @@ def train_loop(data_sharding, batch_size, params, key) -> tuple[Params, jax.Arra
     return new_params, loss
 
 
-def param_sharding_fn(params: Params, mesh) -> dict[str, NamedSharding]:
-    sharding_dict = {}
-
-    for key in params.keys():
-        if key == "model.embed_tokens.weight":
-            sharding_dict[key] = NamedSharding(mesh, PartitionSpec("model", None))
-        else:
-            sharding_dict[key] = NamedSharding(mesh, PartitionSpec())  # replicate
-
-    return sharding_dict
-
-
 # TESTING
 def main(num_batches=100):
     print("--- supervised_train.main() started ---")
     # keys and parameters
     key = jax.random.key(42)
-    print("Loading weights...")
-    params = load_weights_as_dict("data/gemma-3-1b/model_stacked_pt.safetensors")
-    print("Weights loaded.")
 
     # Distributed training
     num_devices: int = jax.device_count()
@@ -90,12 +75,10 @@ def main(num_batches=100):
     device_mesh = mesh_utils.create_device_mesh((batch_axis_size, model_axis_size))
     mesh = Mesh(device_mesh, axis_names=("batch", "model"))
     data_sharding = NamedSharding(mesh, PartitionSpec("batch"))
-    param_shardings = param_sharding_fn(params, mesh)
-    params = jax.tree.map(
-        lambda M, sharding: jax.device_put(M, sharding),
-        params,
-        param_shardings,
-    )
+
+    print("Loading weights...")
+    params = load_params(DEFAULT_ORBAX_CHECKPOINT, mesh)
+    print("Weights loaded.")
 
     # Config
     batch_size = num_devices * 2

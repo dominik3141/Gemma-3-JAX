@@ -176,11 +176,12 @@ def get_KV(
 
 def main() -> None:
     """Test function for forward_single with actual generation."""
-    from utils.inspect_weights import load_weights_as_dict
+    from utils.params_io import DEFAULT_ORBAX_CHECKPOINT, load_params
     from utils.tokenize_text import tokenize_text, detokenize_ids
 
-    print("Loading weights from data/gemma-3-27b/model_stacked_pt.safetensors...")
-    params = load_weights_as_dict("data/gemma-3-27b/model_stacked_pt.safetensors")
+    print("Loading weights from Orbax checkpoint...")
+    mesh = jax.sharding.Mesh(jax.devices(), axis_names=("model",))
+    params = load_params(DEFAULT_ORBAX_CHECKPOINT, mesh)
     print("Weights loaded.")
 
     prompt = "The capital of France is Paris. The capital of Germany is"

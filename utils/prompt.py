@@ -4,7 +4,7 @@ import jax
 import jax.numpy as jnp
 import sentencepiece as spm
 from core.gemma_forward import forward
-from utils.inspect_weights import load_weights_as_dict
+from utils.params_io import DEFAULT_ORBAX_CHECKPOINT, load_params
 
 # Load tokenizer
 VOCAB_SIZE = 262_144
@@ -109,15 +109,15 @@ def cli_main() -> None:
         help="Model mode: 'it' for instruction-trained, 'pt' for pretrained.",
     )
     parser.add_argument(
-        "--weights",
+        "--checkpoint",
         type=str,
-        default=None,
-        help="Path to the stacked safetensors weights (overrides --mode).",
+        default=DEFAULT_ORBAX_CHECKPOINT,
+        help="Orbax checkpoint path (overrides --mode).",
     )
     parser.add_argument(
         "--tokenizer",
         type=str,
-        default="tokenizer.model",
+        default="data/gemma-3-27b/tokenizer.model",
         help="Path to the SentencePiece tokenizer model.",
     )
     parser.add_argument(
@@ -161,11 +161,12 @@ def cli_main() -> None:
     )
     args = parser.parse_args()
 
-    weights_path = args.weights or f"model_stacked_{args.mode}.safetensors"
+    checkpoint_path = args.checkpoint
     template = args.template or ("gemma-instruct" if args.mode == "it" else "plain")
 
     tokenizer = load_tokenizer(args.tokenizer)
-    params = load_weights_as_dict(weights_path)
+    mesh = jax.sharding.Mesh(jax.devices(), axis_names=("model",))
+    params = load_params(checkpoint_path, mesh)
 
     stop_ids: set[int] = set()
     if not args.no_eos_stop:

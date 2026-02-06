@@ -6,7 +6,6 @@ import jax.numpy as jnp
 import jax
 from functools import partial
 from types import SimpleNamespace
-from utils.inspect_weights import load_weights_as_dict
 
 
 Params = dict[str, jax.Array]
@@ -283,7 +282,7 @@ def _model_prefix(params: Params) -> str:
 
 def extract_block_params(params: Params, prefix: str) -> Params:
     block_params = {}
-    layer_prefix = f"{prefix}layers_stacked."
+    layer_prefix = f"{prefix}layers."
 
     for key, val in params.items():
         if key.startswith(layer_prefix):
@@ -367,7 +366,10 @@ def forward(xs: jax.Array, params: Params) -> jax.Array:
 
 @jax.jit
 def main():
-    params = load_weights_as_dict("data/gemma-3-1b/model_stacked_pt.safetensors")
+    from utils.params_io import DEFAULT_ORBAX_CHECKPOINT, load_params
+
+    mesh = jax.sharding.Mesh(jax.devices(), axis_names=("model",))
+    params = load_params(DEFAULT_ORBAX_CHECKPOINT, mesh)
     xs = jnp.array([2, 4237, 3234, 1293094])
 
     xs = forward(xs, params)

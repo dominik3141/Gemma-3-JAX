@@ -1,0 +1,163 @@
+from __future__ import annotations
+
+import uuid
+from typing import Iterable, Tuple, Any
+
+import jax
+from jax.sharding import NamedSharding, PartitionSpec
+import orbax.checkpoint as ocp
+
+
+DEFAULT_ORBAX_CHECKPOINT = (
+    "gs://gemma-3-27b-pt-orbax-b76114af/gemma-3-27b-pt-orbax"
+)
+DEFAULT_GCS_SAVE_ROOT = "gs://gemma-tpu-weights-us-west4-482802/checkpoints"
+
+
+def _normalize_spec_for_rank(
+    spec: PartitionSpec,
+    rank: int,
+) -> PartitionSpec:
+    axes = tuple(spec)
+    if len(axes) < rank:
+        axes = axes + (None,) * (rank - len(axes))
+    elif len(axes) > rank:
+        axes = axes[:rank]
+    return PartitionSpec(*axes)
+
+
+def get_stacked_sharding_spec(
+    name: str,
+    rank: int,
+    is_stacked: bool = False,
+) -> PartitionSpec:
+    """
+    Returns the PartitionSpec for a given weight name.
+    """
+
+    def make_spec(*dims):
+        if is_stacked:
+            return PartitionSpec(None, *dims)
+        return PartitionSpec(*dims)
+
+    if "embed_tokens" in name:
+        spec = make_spec(None, "model")
+    elif "q_proj" in name or "k_proj" in name or "v_proj" in name:
+        spec = make_spec(None, "model")
+    elif "o_proj" in name:
+        spec = make_spec("model", None)
+    elif "gate_proj" in name or "up_proj" in name:
+        spec = make_spec(None, "model")
+    elif "down_proj" in name:
+        spec = make_spec("model", None)
+    else:
+        spec = make_spec(None) if is_stacked else PartitionSpec(None)
+
+    return _normalize_spec_for_rank(spec, rank)
+
+
+def _is_layer_key(key: str) -> bool:
+    return ".layers." in key
+
+
+def _layer_suffix(key: str) -> str:
+    if ".layers." not in key:
+        return key
+    return key.split(".layers.", 1)[1]
+
+
+def _unwrap_metadata(meta_tree: Any) -> Any:
+    if hasattr(meta_tree, "item_metadata"):
+        return meta_tree.item_metadata
+    return meta_tree
+
+
+def _path_to_key(path: Iterable[Any]) -> str:
+    if len(path) == 1:
+        p = path[0]
+        if hasattr(p, "key"):
+            return p.key
+        if isinstance(p, str):
+            return p
+    parts = []
+    for p in path:
+        if hasattr(p, "key"):
+            parts.append(str(p.key))
+        elif hasattr(p, "idx"):
+            parts.append(str(p.idx))
+        else:
+            parts.append(str(p))
+    return ".".join(parts)
+
+
+def _iter_metadata(meta_tree: Any) -> Iterable[Tuple[str, Any]]:
+    if isinstance(meta_tree, dict):
+        for key, meta in meta_tree.items():
+            yield _normalize_key(key), meta
+        return
+
+    leaves, _ = jax.tree_util.tree_flatten_with_path(meta_tree)
+    for path, meta in leaves:
+        key = _path_to_key(path)
+        yield _normalize_key(key), meta
+
+
+def _normalize_key(key: Any) -> str:
+    if isinstance(key, tuple) and len(key) == 1 and isinstance(key[0], str):
+        return key[0]
+    if isinstance(key, str):
+        return key
+    return str(key)
+
+
+def _meta_shape_dtype(meta: Any) -> Tuple[Tuple[int, ...], Any]:
+    if hasattr(meta, "shape"):
+        shape = tuple(meta.shape)
+    elif isinstance(meta, dict) and "shape" in meta:
+        shape = tuple(meta["shape"])
+    else:
+        raise ValueError("Missing shape in checkpoint metadata.")
+
+    if hasattr(meta, "dtype"):
+        dtype = meta.dtype
+    elif isinstance(meta, dict) and "dtype" in meta:
+        dtype = meta["dtype"]
+    else:
+        raise ValueError("Missing dtype in checkpoint metadata.")
+
+    return shape, dtype
+
+
+def _join_checkpoint_path(root: str, name: str) -> str:
+    if root.endswith("/"):
+        return f"{root}{name}"
+    return f"{root}/{name}"
+
+
+def load_params(checkpoint_path: str, mesh: jax.sharding.Mesh) -> dict[str, jax.Array]:
+    ckptr = ocp.StandardCheckpointer()
+    meta_tree = _unwrap_metadata(ckptr.metadata(checkpoint_path))
+
+    target = {}
+    for key, meta in _iter_metadata(meta_tree):
+        shape, dtype = _meta_shape_dtype(meta)
+        is_stacked = _is_layer_key(key)
+        name_for_spec = _layer_suffix(key) if is_stacked else key
+        spec = get_stacked_sharding_spec(
+            name_for_spec, len(shape), is_stacked=is_stacked
+        )
+        sharding = NamedSharding(mesh, spec)
+        target[key] = jax.ShapeDtypeStruct(shape, dtype, sharding=sharding)
+
+    return ckptr.restore(checkpoint_path, target)
+
+
+def save_params(
+    params: dict[str, jax.Array],
+    checkpoint_root: str = DEFAULT_GCS_SAVE_ROOT,
+) -> str:
+    checkpoint_id = uuid.uuid4().hex
+    checkpoint_path = _join_checkpoint_path(checkpoint_root, checkpoint_id)
+    ckptr = ocp.StandardCheckpointer()
+    ckptr.save(checkpoint_path, params)
+    return checkpoint_path
