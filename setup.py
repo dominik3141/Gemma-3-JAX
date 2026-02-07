@@ -229,6 +229,25 @@ def ensure_wandb_api_key() -> bool:
         return False
 
 
+def ensure_system_deps() -> None:
+    """Setup runs under system Python, so install deps needed to fetch W&B credentials."""
+    missing: list[str] = []
+    try:
+        from google.cloud import secretmanager  # noqa: F401
+    except Exception:
+        missing.append("google-cloud-secret-manager")
+    try:
+        import wandb  # noqa: F401
+    except Exception:
+        missing.append("wandb")
+
+    if not missing:
+        return
+
+    print(f"--- Installing system deps: {', '.join(missing)} ---")
+    run([sys.executable, "-m", "pip", "install", "--user", *missing])
+
+
 def main():
     parser = argparse.ArgumentParser(description="Setup JAX environment")
     parser.add_argument(
@@ -236,6 +255,8 @@ def main():
     )
     args, unknown_args = parser.parse_known_args()
 
+    # Setup runs outside the venv, so ensure W&B/Secret Manager deps exist first.
+    ensure_system_deps()
     create_env_file()
     wandb_ready = ensure_wandb_api_key()
 
