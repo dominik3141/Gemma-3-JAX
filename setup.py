@@ -118,7 +118,18 @@ def ensure_gsutil() -> None:
         # Fix for AttributeError: module 'lib' has no attribute 'X509_V_FLAG_NOTIFY_POLICY'
         # in gsutil on some Ubuntu/TPU VM images.
         print("--- Patching cryptography/pyOpenSSL for gsutil ---")
-        run([sys.executable, "-m", "pip", "install", "--user", "--upgrade", "cryptography", "pyOpenSSL"])
+        run(
+            [
+                sys.executable,
+                "-m",
+                "pip",
+                "install",
+                "--user",
+                "--upgrade",
+                "cryptography",
+                "pyOpenSSL",
+            ]
+        )
         return
     print("ERROR: gsutil not found on PATH.")
     print("Install the Google Cloud SDK and authenticate, then re-run setup.")
@@ -197,7 +208,7 @@ def ensure_wandb_api_key() -> bool:
 
     try:
         from google.cloud import secretmanager
-    except Exception as exc:
+    except Exception:
         print(
             "google-cloud-secret-manager is not available yet; will retry after dependencies are installed."
         )
@@ -252,6 +263,16 @@ def ensure_system_deps() -> None:
     run([sys.executable, "-m", "pip", "install", "--user", *missing])
 
 
+def enable_hugepages() -> None:
+    print("--- Enabling Transparent Hugepages ---")
+    try:
+        # This requires sudo and is specific to Linux environments like TPU VMs.
+        cmd = "sudo sh -c 'echo always > /sys/kernel/mm/transparent_hugepage/enabled'"
+        subprocess.run(cmd, shell=True, check=False)
+    except Exception as e:
+        print(f"Warning: Could not enable hugepages: {e}")
+
+
 def main():
     parser = argparse.ArgumentParser(description="Setup JAX environment")
     parser.add_argument(
@@ -261,6 +282,7 @@ def main():
 
     # Setup runs outside the venv, so ensure W&B/Secret Manager deps exist first.
     ensure_system_deps()
+    enable_hugepages()
     create_env_file()
     wandb_ready = ensure_wandb_api_key()
 
@@ -287,13 +309,13 @@ def main():
             print("Forcing JAX to CPU mode")
             env["JAX_PLATFORMS"] = "cpu"
 
-        cmd = ["uv", "run", "python", "-m", "main"] + unknown_args
+        cmd = ["~/.local/bin/uv", "run", "python", "-m", "main"] + unknown_args
 
         print(f"Running: {' '.join(cmd)}")
         subprocess.run(cmd, check=True, env=env)
     else:
         print("--- Setup Complete ---")
-        print("To run training: uv run python -m main")
+        print("To run training: ~/.local/bin/uv run python -m main")
 
 
 if __name__ == "__main__":
