@@ -115,6 +115,10 @@ def sync_dependencies():
 
 def ensure_gsutil() -> None:
     if shutil.which("gsutil"):
+        # Fix for AttributeError: module 'lib' has no attribute 'X509_V_FLAG_NOTIFY_POLICY'
+        # in gsutil on some Ubuntu/TPU VM images.
+        print("--- Patching cryptography/pyOpenSSL for gsutil ---")
+        run([sys.executable, "-m", "pip", "install", "--user", "--upgrade", "cryptography", "pyOpenSSL"])
         return
     print("ERROR: gsutil not found on PATH.")
     print("Install the Google Cloud SDK and authenticate, then re-run setup.")
