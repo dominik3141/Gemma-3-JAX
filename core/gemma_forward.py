@@ -328,15 +328,6 @@ def forward(xs: jax.Array, params: Params) -> jax.Array:
     5.  Map to logits
         (seq_len, 1152) -> (seq_len, 262144)
     """
-    # Padding
-    # we enforce a minimum sequence length of 1024 tokens in order to guarantee
-    # that there are enough tokens for proper dynamic slicing during the local attention
-    # layers
-    # To avoid constant jit recompilation the padding should already have been added by the caller
-    input_length = xs.shape[0]
-    padding_tokens = max(0, 1024 - input_length)
-    xs = jnp.concatenate([xs, jnp.zeros_like(xs, shape=(padding_tokens,))])
-
     model_prefix = _model_prefix(params)
 
     # embedding the tokens
@@ -351,9 +342,6 @@ def forward(xs: jax.Array, params: Params) -> jax.Array:
     xs, _ = jax.lax.scan(
         Block, xs, (extract_block_params(params, model_prefix), is_local_attn)
     )
-
-    # remove padding again (to save memory)
-    xs = xs[:input_length]
 
     # final norm
     xs = jax.vmap(RMSNorm, in_axes=(0, None))(xs, params[f"{model_prefix}norm.weight"])
