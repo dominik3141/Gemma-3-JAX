@@ -28,8 +28,6 @@ TOKENIZER_FILES = [
     "tokenizer_config.json",
 ]
 TOKENIZER_SENTINEL = os.path.join(TOKENIZER_DIR, "tokenizer.model")
-WANDB_SECRET_PROJECT = "default-482802"
-WANDB_SECRET_NAME = "wandb-api-key"
 
 
 def run(cmd, check=True, shell=False):
@@ -204,67 +202,6 @@ def create_env_file():
         upsert_env_file({"GOOGLE_APPLICATION_CREDENTIALS": key_path})
 
 
-def ensure_wandb_api_key() -> bool:
-    if os.environ.get("WANDB_API_KEY"):
-        return True
-
-    try:
-        from google.cloud import secretmanager
-    except Exception:
-        print(
-            "google-cloud-secret-manager is not available yet; will retry after dependencies are installed."
-        )
-        return False
-
-    secret_path = (
-        f"projects/{WANDB_SECRET_PROJECT}/secrets/{WANDB_SECRET_NAME}/versions/latest"
-    )
-    try:
-        client = secretmanager.SecretManagerServiceClient()
-        response = client.access_secret_version(request={"name": secret_path})
-        api_key = response.payload.data.decode("utf-8").strip()
-        if not api_key:
-            raise RuntimeError("Secret payload is empty")
-
-        os.environ["WANDB_API_KEY"] = api_key
-        upsert_env_file({"WANDB_API_KEY": api_key})
-        print(
-            f"--- Loaded WANDB_API_KEY from Secret Manager ({WANDB_SECRET_PROJECT}/{WANDB_SECRET_NAME}) ---"
-        )
-        return True
-    except Exception as exc:
-        print(f"Failed to load WANDB_API_KEY from Secret Manager: {exc}")
-        print("If this is the first time, create the secret and grant access:")
-        print("  gcloud secrets create wandb-api-key --data-file=-")
-        print("  # paste WANDB key, then Ctrl-D")
-        print("  gcloud secrets add-iam-policy-binding wandb-api-key \\")
-        print(
-            "    --member=serviceAccount:gemma-tpu-writer@default-482802.iam.gserviceaccount.com \\"
-        )
-        print("    --role=roles/secretmanager.secretAccessor \\")
-        print("    --project=default-482802")
-        return False
-
-
-def ensure_system_deps() -> None:
-    """Setup runs under system Python, so install deps needed to fetch W&B credentials."""
-    missing: list[str] = []
-    try:
-        from google.cloud import secretmanager  # noqa: F401
-    except Exception:
-        missing.append("google-cloud-secret-manager")
-    try:
-        import wandb  # noqa: F401
-    except Exception:
-        missing.append("wandb")
-
-    if not missing:
-        return
-
-    print(f"--- Installing system deps: {', '.join(missing)} ---")
-    run([sys.executable, "-m", "pip", "install", "--user", *missing])
-
-
 def enable_hugepages() -> None:
     print("--- Enabling Transparent Hugepages ---")
     try:
@@ -290,11 +227,6 @@ def main():
     setup_git()
     install_uv()
     sync_dependencies()
-
-    # Now that uv sync has run, we can reliably access Secret Manager/W&B
-    wandb_ready = ensure_wandb_api_key()
-    if not wandb_ready and not os.environ.get("WANDB_API_KEY"):
-        ensure_wandb_api_key()
 
     download_tokenizer()
 
