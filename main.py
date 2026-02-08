@@ -39,7 +39,14 @@ def init_dist():
     print(f"Backend: {jax.default_backend()}")
 
 
-def load_wandb_api_key_from_secret_manager() -> bool:
+def configure_wandb_api_key_for_worker() -> bool:
+    process_index = jax.process_index()
+
+    if process_index != 0:
+        # Keep credentials only on worker 0.
+        os.environ.pop("WANDB_API_KEY", None)
+        return False
+
     if os.environ.get("WANDB_API_KEY"):
         return True
 
@@ -81,10 +88,10 @@ if __name__ == "__main__":
     from utils.gcp import init_gcp_logging
 
     init_gcp_logging()
-    load_wandb_api_key_from_secret_manager()
 
     # must be called before any importing anything that might use JAX
     init_dist()
+    configure_wandb_api_key_for_worker()
 
     from core.rl import main
 
