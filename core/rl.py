@@ -638,16 +638,18 @@ def main():
             if i == 5:
                 jax.profiler.stop_trace()
                 print("Stopped JAX profiler trace.")
-                
+
                 # Upload artifacts to GCS
                 try:
                     timestamp = int(time.time())
+                    process_index = jax.process_index()
                     gcs_bucket = "gs://gemma-3-training-profiles-20260207-165411-1d9c5e"
-                    destination = f"{gcs_bucket}/{timestamp}/"
+                    # Add process_index to path to avoid collisions between hosts
+                    destination = f"{gcs_bucket}/{timestamp}/host_{process_index}/"
                     print(f"Uploading artifacts to {destination}...")
                     subprocess.run(
-                        ["gsutil", "-m", "cp", "-r", "artifacts", destination], 
-                        check=True
+                        ["gsutil", "-m", "cp", "-r", "artifacts", destination],
+                        check=True,
                     )
                     print("Upload complete.")
                 except Exception as e:

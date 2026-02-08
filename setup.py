@@ -134,7 +134,10 @@ def download_tokenizer() -> None:
 
         # Use uv run python to download via google-cloud-storage to avoid broken system gsutil
         bucket_name = TOKENIZER_ROOT.replace("gs://", "").split("/")[0]
-        blob_path = "/".join(TOKENIZER_ROOT.replace("gs://", "").split("/")[1:]) + f"/{filename}"
+        blob_path = (
+            "/".join(TOKENIZER_ROOT.replace("gs://", "").split("/")[1:])
+            + f"/{filename}"
+        )
 
         gcs_cmd = [
             "uv",
