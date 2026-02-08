@@ -53,10 +53,9 @@ def install_uv():
 
     # Add to PATH for this session
     home = os.path.expanduser("~")
-    for path in [".local/bin", ".cargo/bin"]:
-        uv_bin = os.path.join(home, path)
-        if os.path.exists(uv_bin) and uv_bin not in os.environ["PATH"]:
-            os.environ["PATH"] = uv_bin + os.pathsep + os.environ["PATH"]
+    local_bin = os.path.join(home, ".local/bin")
+    if os.path.exists(local_bin) and local_bin not in os.environ["PATH"]:
+        os.environ["PATH"] = local_bin + os.pathsep + os.environ["PATH"]
 
 
 def get_metadata(attribute):
@@ -114,26 +113,10 @@ def sync_dependencies():
 
 
 def ensure_gsutil() -> None:
+    """Check if gsutil is available. We avoid patching system python as it breaks gsutil."""
     if shutil.which("gsutil"):
-        # Fix for AttributeError: module 'lib' has no attribute 'X509_V_FLAG_NOTIFY_POLICY'
-        # in gsutil on some Ubuntu/TPU VM images.
-        print("--- Patching cryptography/pyOpenSSL for gsutil ---")
-        run(
-            [
-                sys.executable,
-                "-m",
-                "pip",
-                "install",
-                "--user",
-                "--upgrade",
-                "cryptography",
-                "pyOpenSSL",
-            ]
-        )
         return
-    print("ERROR: gsutil not found on PATH.")
-    print("Install the Google Cloud SDK and authenticate, then re-run setup.")
-    sys.exit(1)
+    print("WARNING: gsutil not found on PATH. Falling back to uv-based GCS downloads.")
 
 
 def download_tokenizer() -> None:
@@ -148,7 +131,23 @@ def download_tokenizer() -> None:
         source = f"{TOKENIZER_ROOT}/{filename}"
         dest = os.path.join(TOKENIZER_DIR, filename)
         print(f"--- Downloading tokenizer: {source} ---")
-        run(["gsutil", "cp", source, dest])
+
+        # Use uv run python to download via google-cloud-storage to avoid broken system gsutil
+        bucket_name = TOKENIZER_ROOT.replace("gs://", "").split("/")[0]
+        blob_path = "/".join(TOKENIZER_ROOT.replace("gs://", "").split("/")[1:]) + f"/{filename}"
+
+        gcs_cmd = [
+            "uv",
+            "run",
+            "python",
+            "-c",
+            f"from google.cloud import storage; storage.Client().bucket('{bucket_name}').blob('{blob_path}').download_to_filename('{dest}')",
+        ]
+        try:
+            run(gcs_cmd)
+        except Exception as e:
+            print(f"uv-based download failed: {e}. Trying gsutil as fallback...")
+            run(["gsutil", "cp", source, dest])
 
     if not os.path.exists(TOKENIZER_SENTINEL):
         print(f"ERROR: Expected tokenizer file missing: {TOKENIZER_SENTINEL}")
@@ -282,17 +281,18 @@ def main():
     )
     args, unknown_args = parser.parse_known_args()
 
-    # Setup runs outside the venv, so ensure W&B/Secret Manager deps exist first.
-    ensure_system_deps()
     enable_hugepages()
     create_env_file()
-    wandb_ready = ensure_wandb_api_key()
 
     setup_git()
     install_uv()
     sync_dependencies()
+
+    # Now that uv sync has run, we can reliably access Secret Manager/W&B
+    wandb_ready = ensure_wandb_api_key()
     if not wandb_ready and not os.environ.get("WANDB_API_KEY"):
         ensure_wandb_api_key()
+
     download_tokenizer()
 
     if args.run_main:
