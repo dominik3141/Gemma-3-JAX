@@ -2,6 +2,18 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+import os
+
+# Configure HLO dumping
+# Must be done before JAX is initialized/used
+os.environ["XLA_FLAGS"] = (
+    os.environ.get("XLA_FLAGS", "") +
+    " --xla_dump_to=artifacts/hlo"
+    " --xla_dump_hlo_as_text"
+    " --xla_dump_hlo_as_html"
+    " --xla_dump_hlo_as_proto"
+)
+
 import jax
 
 # os.environ["XLA_FLAGS"] = "--xla_force_host_platform_device_count=16"

@@ -34,6 +34,8 @@ import socket
 import jax
 import jax.numpy as jnp
 import optax
+import time
+import subprocess
 from core.gemma_forward import Params, forward
 from core.gemma_forward_inference import forward_single, get_KV
 from utils.gcp import log_text_async
@@ -626,8 +628,31 @@ def main():
         },
     )
     try:
+        print("Starting JAX profiler trace...")
+        jax.profiler.start_trace("artifacts/profile")
+
         while True:
             wandb_logging.set_step(i)
+
+            # Profiling
+            if i == 5:
+                jax.profiler.stop_trace()
+                print("Stopped JAX profiler trace.")
+                
+                # Upload artifacts to GCS
+                try:
+                    timestamp = int(time.time())
+                    gcs_bucket = "gs://gemma-3-training-profiles-20260207-165411-1d9c5e"
+                    destination = f"{gcs_bucket}/{timestamp}/"
+                    print(f"Uploading artifacts to {destination}...")
+                    subprocess.run(
+                        ["gsutil", "-m", "cp", "-r", "artifacts", destination], 
+                        check=True
+                    )
+                    print("Upload complete.")
+                except Exception as e:
+                    print(f"Failed to upload artifacts: {e}")
+
             params, loss, format_pct, correct_pct, optimizer_state = train_loop(
                 key, params, params_ref, optimizer_state
             )
