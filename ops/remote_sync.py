@@ -2,6 +2,7 @@
 """
 Dev Workflow Sync Script.
 Syncs current directory to a remote GCE VM (TPU or GPU) for interactive debugging.
+Always tunnels through IAP (no external IPs required).
 """
 
 import argparse
@@ -50,6 +51,7 @@ def sync_code(vm_name, zone, is_tpu):
         run(
             [
                 "gcloud",
+                "alpha",
                 "compute",
                 "tpus",
                 "tpu-vm",
@@ -57,6 +59,7 @@ def sync_code(vm_name, zone, is_tpu):
                 vm_name,
                 f"--zone={zone}",
                 "--worker=all",
+                "--tunnel-through-iap",
                 "--command",
                 "rm -rf ~/app && mkdir -p ~/app",
             ]
@@ -65,6 +68,7 @@ def sync_code(vm_name, zone, is_tpu):
         run(
             [
                 "gcloud",
+                "alpha",
                 "compute",
                 "tpus",
                 "tpu-vm",
@@ -73,12 +77,14 @@ def sync_code(vm_name, zone, is_tpu):
                 "--worker=all",
                 f"{vm_name}:~/dev_sync.tar.gz",
                 f"--zone={zone}",
+                "--tunnel-through-iap",
             ]
         )
         # Untar
         run(
             [
                 "gcloud",
+                "alpha",
                 "compute",
                 "tpus",
                 "tpu-vm",
@@ -86,6 +92,7 @@ def sync_code(vm_name, zone, is_tpu):
                 vm_name,
                 f"--zone={zone}",
                 "--worker=all",
+                "--tunnel-through-iap",
                 "--command",
                 "tar --warning=no-unknown-keyword -xzf ~/dev_sync.tar.gz -C ~/app && rm ~/dev_sync.tar.gz",
             ]
@@ -99,6 +106,7 @@ def sync_code(vm_name, zone, is_tpu):
                 "ssh",
                 vm_name,
                 f"--zone={zone}",
+                "--tunnel-through-iap",
                 "--command",
                 "rm -rf ~/app && mkdir -p ~/app",
             ]
@@ -112,6 +120,7 @@ def sync_code(vm_name, zone, is_tpu):
                 "dev_sync.tar.gz",
                 f"{vm_name}:~/dev_sync.tar.gz",
                 f"--zone={zone}",
+                "--tunnel-through-iap",
             ]
         )
         run(
@@ -121,6 +130,7 @@ def sync_code(vm_name, zone, is_tpu):
                 "ssh",
                 vm_name,
                 f"--zone={zone}",
+                "--tunnel-through-iap",
                 "--command",
                 "tar --warning=no-unknown-keyword -xzf ~/dev_sync.tar.gz -C ~/app && rm ~/dev_sync.tar.gz",
             ]
@@ -128,18 +138,29 @@ def sync_code(vm_name, zone, is_tpu):
 
     subprocess.run(["rm", "dev_sync.tar.gz"])
     print("--- Sync Complete ---")
-    print(
-        f"To connect: gcloud compute {'tpus tpu-vm' if is_tpu else ''} ssh {vm_name} --zone={zone}"
-    )
+    if is_tpu:
+        print(
+            f"To connect: gcloud alpha compute tpus tpu-vm ssh {vm_name} --zone={zone} --tunnel-through-iap"
+        )
+    else:
+        print(
+            f"To connect: gcloud compute ssh {vm_name} --zone={zone} --tunnel-through-iap"
+        )
     print("1. Setup:   cd ~/app && python3 setup.py")
     print("2. Run:     uv run python -m main")
 
 
 def main():
-    parser = argparse.ArgumentParser()
+    parser = argparse.ArgumentParser(
+        description="Sync code to a VM via IAP (no external IPs required)."
+    )
     parser.add_argument("--vm", required=True, help="Name of the VM")
     parser.add_argument("--zone", required=True, help="Zone of the VM")
-    parser.add_argument("--tpu", action="store_true", help="Is this a TPU VM?")
+    parser.add_argument(
+        "--tpu",
+        action="store_true",
+        help="Is this a TPU VM? (uses gcloud alpha + IAP)",
+    )
     args = parser.parse_args()
 
     sync_code(args.vm, args.zone, args.tpu)

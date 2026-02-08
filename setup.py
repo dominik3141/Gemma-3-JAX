@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Zero-dependency setup script for JAX Gemma.
-Runs on Compute Engine environments.
+Runs on Compute Engine environments (VMs are expected to be IAP-only).
 
 Responsibilities:
 1. Configure Git (for dev/debug).
@@ -274,7 +274,9 @@ def enable_hugepages() -> None:
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Setup JAX environment")
+    parser = argparse.ArgumentParser(
+        description="Setup JAX environment (assumes IAP-only access)."
+    )
     parser.add_argument(
         "--run-main", action="store_true", help="Launch main.py after setup"
     )
