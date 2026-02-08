@@ -1,6 +1,6 @@
 # Gemma 3 single file implementation in JAX
 
-An extremely simple implementation of the 1b version of Gemma 3.
+An extremely simple implementation of the 27b version of Gemma 3.
 All important files are in `core`, all other code is boring and maintained by AI.
 
 ## Core files
