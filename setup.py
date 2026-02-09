@@ -155,53 +155,6 @@ def download_tokenizer() -> None:
         sys.exit(1)
 
 
-def upsert_env_file(updates: dict[str, str]) -> None:
-    env_path = ".env"
-    existing_lines: list[str] = []
-    if os.path.exists(env_path):
-        with open(env_path, "r") as f:
-            existing_lines = f.readlines()
-
-    new_lines: list[str] = []
-    seen_keys: set[str] = set()
-
-    for line in existing_lines:
-        stripped = line.strip()
-        if not stripped or stripped.startswith("#") or "=" not in line:
-            new_lines.append(line)
-            continue
-
-        key_part, _ = line.split("=", 1)
-        key_part = key_part.strip()
-        prefix = ""
-        if key_part.startswith("export "):
-            prefix = "export "
-            key = key_part[len("export ") :].strip()
-        else:
-            key = key_part
-
-        if key in updates:
-            new_lines.append(f"{prefix}{key}={updates[key]}\n")
-            seen_keys.add(key)
-        else:
-            new_lines.append(line)
-
-    for key, value in updates.items():
-        if key not in seen_keys:
-            new_lines.append(f"{key}={value}\n")
-
-    with open(env_path, "w") as f:
-        f.writelines(new_lines)
-
-
-def create_env_file():
-    key_path = os.path.join(os.getcwd(), "ops", "gemma-tpu-writer-key.json")
-    if os.path.exists(key_path):
-        print(f"--- Configuring .env with key: {key_path} ---")
-        os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = key_path
-        upsert_env_file({"GOOGLE_APPLICATION_CREDENTIALS": key_path})
-
-
 def enable_hugepages() -> None:
     print("--- Enabling Transparent Hugepages ---")
     try:
@@ -222,8 +175,6 @@ def main():
     args, unknown_args = parser.parse_known_args()
 
     enable_hugepages()
-    create_env_file()
-
     setup_git()
     install_uv()
     sync_dependencies()

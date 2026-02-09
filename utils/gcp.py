@@ -97,22 +97,11 @@ def init_gcp_logging():
 
     import google.cloud.logging
     from google.cloud.logging.handlers import CloudLoggingHandler
-    import google.auth
-    from google.oauth2 import service_account
     import logging
     import sys
-    from pathlib import Path
 
-    # Load credentials from the ops directory
-    credentials_path = (
-        Path(__file__).parent.parent / "ops" / "gemma-tpu-writer-key.json"
-    )
-    credentials = service_account.Credentials.from_service_account_file(
-        str(credentials_path)
-    )
-
-    # Initialize GCP Client and Handler with custom labels
-    client = google.cloud.logging.Client(credentials=credentials)
+    # Initialize GCP Client and Handler with custom labels using ADC metadata auth.
+    client = google.cloud.logging.Client()
     handler = CloudLoggingHandler(client, labels={"project": "jax-gemma"})
 
     # Add GCP handler to the root logger to send logs without replacing existing ones
