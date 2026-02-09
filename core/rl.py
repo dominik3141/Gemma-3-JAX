@@ -25,6 +25,8 @@ NUM_GROUPS_PER_UPDATE = 32  # as suggested by R1 paper
 LEARNING_RATE = (
     (GROUP_SIZE / 16) * (NUM_GROUPS_PER_UPDATE / 32) * 3e-6
 )  # as suggested by R1 paper
+ENABLE_PROFILER = False
+PROFILE_STOP_STEP = 5
 
 import re
 import math
@@ -628,14 +630,15 @@ def main():
         },
     )
     try:
-        print("Starting JAX profiler trace...")
-        jax.profiler.start_trace("artifacts/profile")
+        if ENABLE_PROFILER:
+            print("Starting JAX profiler trace...")
+            jax.profiler.start_trace("artifacts/profile")
 
         while True:
             wandb_logging.set_step(i)
 
             # Profiling
-            if i == 5:
+            if ENABLE_PROFILER and i == PROFILE_STOP_STEP:
                 jax.profiler.stop_trace()
                 print("Stopped JAX profiler trace.")
 
