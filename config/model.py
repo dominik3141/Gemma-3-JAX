@@ -1,0 +1,13 @@
+from types import SimpleNamespace
+
+gemma_3_27b = SimpleNamespace(
+    num_attention_heads=32,
+    num_key_value_heads=16,
+    num_queries_per_group=2,
+    num_layers=62,
+    d_model=5376,
+    d_kvq=128,
+    head_dim=128,
+    d_mlp=21504,
+    sliding_window=1024,
+)

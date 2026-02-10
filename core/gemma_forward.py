@@ -5,23 +5,10 @@ All comments that include concrete dimensionality numbers are written with the 1
 import jax.numpy as jnp
 import jax
 from functools import partial
-from types import SimpleNamespace
+from config.model import gemma_3_27b as config
 
 
 Params = dict[str, jax.Array]
-
-# Config for the 27B version
-config = SimpleNamespace(
-    num_attention_heads=32,
-    num_key_value_heads=16,
-    num_queries_per_group=2,
-    num_layers=62,
-    d_model=5376,
-    d_kvq=128,
-    head_dim=128,
-    d_mlp=21504,
-    sliding_window=1024,
-)
 
 
 def RMSNorm(x: jax.Array, gamma: jax.Array) -> jax.Array:
