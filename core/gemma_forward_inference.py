@@ -69,8 +69,8 @@ def Block_KV_cached(inits, scans) -> jax.Array:
     K_new, V_new, Qs = calc_qkv(x, block_params, pos, is_local_attn)
 
     # Update fixed-size KV cache
-    Ks = Ks_cached.at[pos].set(K_new)
-    Vs = Vs_cached.at[pos].set(V_new)
+    Ks = jax.lax.dynamic_update_index_in_dim(Ks_cached, K_new, pos, axis=0)
+    Vs = jax.lax.dynamic_update_index_in_dim(Vs_cached, V_new, pos, axis=0)
 
     # COMMUNICATION WITH OTHER TOKENS
     x = jax.vmap(
