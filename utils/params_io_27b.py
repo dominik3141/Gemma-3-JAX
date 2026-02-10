@@ -1,3 +1,8 @@
+r"""
+Can retrieve and save parameters of Gemma 3 27B.
+Logic for this version is a bit more complicated than for the 1b version due to the need for sharded loading.
+"""
+
 from __future__ import annotations
 
 import uuid

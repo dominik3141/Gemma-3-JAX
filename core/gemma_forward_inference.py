@@ -176,7 +176,7 @@ def get_KV(
 
 def main() -> None:
     """Test function for forward_single with actual generation."""
-    from utils.params_io import DEFAULT_ORBAX_CHECKPOINT, load_params
+    from utils.params_io_27b import DEFAULT_ORBAX_CHECKPOINT, load_params
     from utils.tokenize_text import tokenize_text, detokenize_ids
 
     print("Loading weights from Orbax checkpoint...")

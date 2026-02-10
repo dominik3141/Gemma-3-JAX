@@ -341,7 +341,7 @@ def forward(xs: jax.Array, params: Params) -> jax.Array:
 
 @jax.jit
 def main():
-    from utils.params_io import DEFAULT_ORBAX_CHECKPOINT, load_params
+    from utils.params_io_27b import DEFAULT_ORBAX_CHECKPOINT, load_params
 
     params = load_params(DEFAULT_ORBAX_CHECKPOINT)
     xs = jnp.array([2, 4237, 3234, 1293094])
