@@ -23,9 +23,9 @@ import jax.numpy as jnp
 from core.gemma_forward import (
     Params,
     RMSNorm,
+    RoPE,
     _model_prefix,
     attnHead,
-    calc_qkv,
     config,
     extract_block_params,
     get_gemma3_layer_types,
@@ -66,7 +66,7 @@ def Block_KV_cached(inits, scans) -> jax.Array:
     x = RMSNorm(x, block_params["input_layernorm.weight"])
 
     # Calculate comm vectors for new token
-    K_new, V_new, Qs = calc_qkv(x, block_params, pos, is_local_attn)
+    K_new, V_new, Qs = calc_qkv_fused(x, block_params, pos, is_local_attn)
 
     # Update fixed-size KV cache
     Ks = Ks_cached.at[pos].set(K_new)
@@ -82,6 +82,67 @@ def Block_KV_cached(inits, scans) -> jax.Array:
     x = postAttn(x, x_og, block_params)
 
     return (x, pos), (Ks, Vs)
+
+
+def calc_qkv_fused(
+    x: jax.Array, block_params: Params, pos: jax.Array, is_local_attn: jax.Array
+) -> tuple[jax.Array, jax.Array, jax.Array]:
+    """
+    Fused Q/K/V projection for a single token using precomputed weights.
+    """
+    theta = jnp.where(is_local_attn, 10_000.0, 1_000_000.0)
+
+    w_qkv = block_params["self_attn.qkv_proj.weight"]
+    qkv = w_qkv @ x
+
+    k_dim = config.num_key_value_heads * config.head_dim
+    v_dim = config.num_key_value_heads * config.d_kvq
+
+    Ks = qkv[:k_dim]
+    Vs = qkv[k_dim : k_dim + v_dim]
+    Qss = qkv[k_dim + v_dim :]
+
+    Ks = jnp.reshape(Ks, (config.num_key_value_heads, config.head_dim))
+    Ks = jax.vmap(RMSNorm, in_axes=(0, None))(
+        Ks, block_params["self_attn.k_norm.weight"]
+    )
+    Ks = jax.vmap(RoPE, in_axes=(0, None, None))(Ks, pos, theta)
+
+    Vs = jnp.reshape(Vs, (config.num_key_value_heads, config.d_kvq))
+
+    Qss = jnp.reshape(
+        Qss,
+        (config.num_key_value_heads * config.num_queries_per_group, config.d_kvq),
+    )
+    Qss = jax.vmap(lambda Q: RMSNorm(Q, block_params["self_attn.q_norm.weight"]))(Qss)
+    Qss = jax.vmap(lambda Q, p, theta: RoPE(Q, p, theta), in_axes=(0, None, None))(
+        Qss, pos, theta
+    )
+    Qss = jnp.reshape(
+        Qss,
+        (config.num_key_value_heads, config.num_queries_per_group, config.d_kvq),
+    )
+
+    return Ks, Vs, Qss
+
+
+def add_fused_qkv_params(params: Params) -> Params:
+    """
+    Add per-layer fused QKV projection weights to params.
+    """
+    model_prefix = _model_prefix(params)
+    fused_key = f"{model_prefix}layers.self_attn.qkv_proj.weight"
+    if fused_key in params:
+        return params
+
+    layer_prefix = f"{model_prefix}layers.self_attn."
+    wq = params[f"{layer_prefix}q_proj.weight"]
+    wk = params[f"{layer_prefix}k_proj.weight"]
+    wv = params[f"{layer_prefix}v_proj.weight"]
+
+    params_with_fused = dict(params)
+    params_with_fused[fused_key] = jnp.concatenate([wk, wv, wq], axis=1)
+    return params_with_fused
 
 
 @jax.jit
@@ -135,6 +196,7 @@ def get_KV(
     """
     Given a tokenized prompt, return the prefilled KV cache.
     """
+    params = add_fused_qkv_params(params)
     n = prompt.shape[0]  # prompt should have shape (seq_len)
 
     assert cache_size >= n
@@ -183,6 +245,7 @@ def main() -> None:
 
     print("Loading weights from Orbax checkpoint...")
     params = load_params(DEFAULT_ORBAX_CHECKPOINT)
+    params = add_fused_qkv_params(params)
     print("Weights loaded.")
 
     prompt = "The capital of France is Paris. The capital of Germany is"
