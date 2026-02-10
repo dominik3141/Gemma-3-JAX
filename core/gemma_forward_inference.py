@@ -176,7 +176,7 @@ def get_KV(
 
 def main() -> None:
     """Test function for forward_single with actual generation."""
-    from utils.params_io_27b import DEFAULT_ORBAX_CHECKPOINT, load_params
+    from utils.params_io_1b import load_params, DEFAULT_ORBAX_CHECKPOINT
     from utils.tokenize_text import tokenize_text, detokenize_ids
 
     print("Loading weights from Orbax checkpoint...")
@@ -196,7 +196,7 @@ def main() -> None:
     # Initialize cache
     num_layers = config.num_layers
     head_dim = config.head_dim
-    max_seq_len = config.sliding_window
+    max_seq_len = 1024
 
     # Initialize with fixed size
     Ks_cached = jnp.zeros(
