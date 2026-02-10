@@ -195,7 +195,7 @@ def main() -> None:
     print(f"Prompt: '{prompt}'")
     print(f"Tokens: {tokens}")
 
-    max_new_tokens = 1000
+    max_new_tokens = 100
 
     # Initialize cache
     num_layers = config.num_layers
