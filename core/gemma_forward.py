@@ -123,8 +123,7 @@ def AttnScores(
     """
     d_k = Q_a.shape[0]
 
-    scale = jnp.asarray(1.0 / (d_k**0.5), dtype=Q_a.dtype)
-    scores = (Q_a @ jnp.transpose(Ks)) * scale
+    scores = (Q_a @ jnp.transpose(Ks)) / jnp.sqrt(d_k)
 
     # causal masking
     scores = jnp.where(seq_indices <= idx_a, scores, -jnp.inf)
