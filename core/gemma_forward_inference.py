@@ -18,8 +18,6 @@ TODO:
     - Extract the logic that is shared among all forward functions to a separate file (RMSNorm etc.)
 """
 
-import os
-
 import jax
 import jax.numpy as jnp
 from core.gemma_forward import (
@@ -218,7 +216,6 @@ def main() -> None:
 
     print("Processing prompt (prefill)...")
     logits = None
-    trace_dir = os.environ.get("JAX_PROFILE_DIR")
 
     # Warmup/compile outside measured timings to avoid one-time JIT cost in stats.
     _warmup_token = jnp.array(tokens[0])
@@ -229,9 +226,6 @@ def main() -> None:
         _warmup_token, params, _warmup_pos, _warmup_K, _warmup_V
     )
     _warmup_logits.block_until_ready()
-
-    if trace_dir:
-        jax.profiler.start_trace(trace_dir)
 
     # Process each token in the prompt
     prefill_start = time.perf_counter()
@@ -274,8 +268,6 @@ def main() -> None:
         logits.block_until_ready()
         curr_pos += 1
     generation_elapsed = time.perf_counter() - generation_start
-    if trace_dir:
-        jax.profiler.stop_trace()
 
     if not printed_trailing_newline:
         print()
