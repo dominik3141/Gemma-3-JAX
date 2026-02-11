@@ -246,11 +246,19 @@ def main() -> None:
     generated_tokens = []
 
     curr_pos = len(tokens)
+    printed_trailing_newline = True
+
     generation_start = time.perf_counter()
     for _ in range(max_new_tokens):
         # Sample from logits (greedy)
         next_token = jnp.argmax(logits).item()
         generated_tokens.append(next_token)
+
+        # Stream sampled token text immediately.
+        token_text = detokenize_ids([next_token])
+        if token_text:
+            print(token_text, end="", flush=True)
+            printed_trailing_newline = token_text.endswith("\n")
 
         # Feed back
         token_id = jnp.array(next_token)
@@ -260,6 +268,9 @@ def main() -> None:
         logits.block_until_ready()
         curr_pos += 1
     generation_elapsed = time.perf_counter() - generation_start
+
+    if not printed_trailing_newline:
+        print()
 
     final_text = detokenize_ids(tokens + generated_tokens)
     print(f"Final output: {final_text}")
