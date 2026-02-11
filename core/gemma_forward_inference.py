@@ -174,6 +174,37 @@ def get_KV(
     return K_cache, V_cache
 
 
+def generate_scan(
+    start_logits: jax.Array,
+    params: Params,
+    start_pos: int,
+    Ks_cached: jax.Array,
+    Vs_cached: jax.Array,
+    max_new_tokens: int,
+) -> tuple[jax.Array, jax.Array, jax.Array, jax.Array]:
+    """
+    Generate tokens on-device using a lax.scan loop to reduce host-device sync.
+    Returns generated token ids, final logits, and updated KV caches.
+    """
+
+    def scan_step(carry, _):
+        logits, Ks_cached, Vs_cached, curr_pos = carry
+        next_token = jnp.argmax(logits).astype(jnp.int32)
+        logits, Ks_cached, Vs_cached = forward_single(
+            next_token, params, curr_pos, Ks_cached, Vs_cached
+        )
+        return (logits, Ks_cached, Vs_cached, curr_pos + 1), next_token
+
+    carry = (start_logits, Ks_cached, Vs_cached, jnp.array(start_pos))
+    (logits, Ks_cached, Vs_cached, _), tokens = jax.lax.scan(
+        scan_step, carry, xs=None, length=max_new_tokens
+    )
+    return tokens, logits, Ks_cached, Vs_cached
+
+
+generate_scan_jit = jax.jit(generate_scan, static_argnames=("max_new_tokens",))
+
+
 def main() -> None:
     """Test function for forward_single with actual generation."""
     import time
@@ -243,31 +274,24 @@ def main() -> None:
 
     # Generate new tokens
     print("Generating:")
-    generated_tokens = []
 
     curr_pos = len(tokens)
-    printed_trailing_newline = True
-
     generation_start = time.perf_counter()
-    for _ in range(max_new_tokens):
-        # Sample from logits (greedy)
-        next_token = jnp.argmax(logits).item()
-        generated_tokens.append(next_token)
+    generated_tokens, logits, Ks_cached, Vs_cached = generate_scan_jit(
+        logits, params, curr_pos, Ks_cached, Vs_cached, max_new_tokens
+    )
+    generated_tokens.block_until_ready()
+    generation_elapsed = time.perf_counter() - generation_start
 
-        # Stream sampled token text immediately.
+    generated_tokens = list(map(int, generated_tokens.tolist()))
+
+    # Stream sampled token text immediately (after generation completes).
+    printed_trailing_newline = True
+    for next_token in generated_tokens:
         token_text = detokenize_ids([next_token])
         if token_text:
             print(token_text, end="", flush=True)
             printed_trailing_newline = token_text.endswith("\n")
-
-        # Feed back
-        token_id = jnp.array(next_token)
-        logits, Ks_cached, Vs_cached = forward_single(
-            token_id, params, curr_pos, Ks_cached, Vs_cached
-        )
-        logits.block_until_ready()
-        curr_pos += 1
-    generation_elapsed = time.perf_counter() - generation_start
 
     if not printed_trailing_newline:
         print()
