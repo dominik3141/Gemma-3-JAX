@@ -43,12 +43,9 @@ def group_attention_single(
     """
     Group attention for a single token and a single KV head group.
     """
-    Qs = Qss[:, None, :]  # (num_queries_per_group, 1, d_kvq)
-    pos_array = jnp.array([pos])
-    xs = jax.vmap(attnHead, in_axes=(None, None, 0, None, None))(
-        Ks, Vs, Qs, pos_array, is_local_attn
-    )
-    xs = xs[:, 0, :]  # (num_queries_per_group, d_kvq)
+    Qs = Qss  # (num_queries_per_group, d_kvq)
+    pos_array = jnp.full((config.num_queries_per_group,), pos)
+    xs = attnHead(Ks, Vs, Qs, pos_array, is_local_attn)
     return jnp.reshape(xs, (config.num_queries_per_group * config.d_kvq,))
 
 
