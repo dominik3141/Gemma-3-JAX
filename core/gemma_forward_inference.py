@@ -174,6 +174,26 @@ def get_KV(
     return K_cache, V_cache
 
 
+@jax.jit
+def prefill_prompt(
+    tokens: jax.Array, params: Params, Ks_cached: jax.Array, Vs_cached: jax.Array
+) -> tuple[jax.Array, jax.Array, jax.Array]:
+    pos = jnp.arange(0, tokens.shape[0])
+
+    def forward_single_scanable(carry, scans):
+        Ks_cached, Vs_cached = carry
+        x, pos = scans
+
+        logits, Ks_cached, Vs_cached = forward_single(x, params, pos, Ks_cached, Vs_cached)
+
+        return (Ks_cached, Vs_cached), logits
+
+    (Ks_cached, Vs_cached), logits = jax.lax.scan(
+        forward_single_scanable, (Ks_cached, Vs_cached), (tokens, pos)
+    )
+    return logits[-1], Ks_cached, Vs_cached
+
+
 def main() -> None:
     """Test function for forward_single with actual generation."""
     import time
@@ -194,6 +214,7 @@ def main() -> None:
 
     print(f"Prompt: '{prompt}'")
     print(f"Tokens: {tokens}")
+    tokens_arr = jnp.array(tokens)
 
     max_new_tokens = 100
 
@@ -226,17 +247,17 @@ def main() -> None:
         _warmup_token, params, _warmup_pos, _warmup_K, _warmup_V
     )
     _warmup_logits.block_until_ready()
+    _warmup_prefill_logits, _, _ = prefill_prompt(
+        tokens_arr, params, _warmup_K, _warmup_V
+    )
+    _warmup_prefill_logits.block_until_ready()
 
     # Process each token in the prompt
     prefill_start = time.perf_counter()
-    for i, token in enumerate(tokens):
-        token_id = jnp.array(token)
-        pos = i  # Position in sequence
-
-        logits, Ks_cached, Vs_cached = forward_single(
-            token_id, params, pos, Ks_cached, Vs_cached
-        )
-        logits.block_until_ready()
+    logits, Ks_cached, Vs_cached = prefill_prompt(
+        tokens_arr, params, Ks_cached, Vs_cached
+    )
+    logits.block_until_ready()
     prefill_elapsed = time.perf_counter() - prefill_start
 
     print("Prompt processed.")
