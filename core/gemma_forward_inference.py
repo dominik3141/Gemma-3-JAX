@@ -174,35 +174,6 @@ def get_KV(
     return K_cache, V_cache
 
 
-def prefill_scan(
-    prompt: jax.Array,
-    params: Params,
-    Ks_cached: jax.Array,
-    Vs_cached: jax.Array,
-) -> tuple[jax.Array, jax.Array, jax.Array]:
-    """
-    Prefill KV cache for a full prompt using a scan over tokens.
-    Returns the logits for the last prompt token and updated KV cache.
-    """
-
-    def forward_single_scanable(carry, scans):
-        Ks_cached, Vs_cached = carry
-        x, pos = scans
-
-        logits, Ks_cached, Vs_cached = forward_single(x, params, pos, Ks_cached, Vs_cached)
-
-        return (Ks_cached, Vs_cached), logits
-
-    pos = jnp.arange(0, prompt.shape[0], dtype=jnp.int32)
-    (Ks_cached, Vs_cached), logits_seq = jax.lax.scan(
-        forward_single_scanable, (Ks_cached, Vs_cached), (prompt, pos)
-    )
-    return logits_seq[-1], Ks_cached, Vs_cached
-
-
-prefill_scan_jit = jax.jit(prefill_scan)
-
-
 def generate_scan(
     start_logits: jax.Array,
     params: Params,
@@ -286,11 +257,6 @@ def main() -> None:
         _warmup_token, params, _warmup_pos, _warmup_K, _warmup_V
     )
     _warmup_logits.block_until_ready()
-    _warmup_prompt = jnp.array(tokens)
-    _warmup_logits, _, _ = prefill_scan_jit(
-        _warmup_prompt, params, _warmup_K, _warmup_V
-    )
-    _warmup_logits.block_until_ready()
     _warmup_tokens, _, _, _ = generate_scan_jit(
         _warmup_logits, params, _warmup_pos, _warmup_K, _warmup_V, max_new_tokens
     )
@@ -298,11 +264,14 @@ def main() -> None:
 
     # Process each token in the prompt
     prefill_start = time.perf_counter()
-    prompt_ids = jnp.array(tokens)
-    logits, Ks_cached, Vs_cached = prefill_scan_jit(
-        prompt_ids, params, Ks_cached, Vs_cached
-    )
-    logits.block_until_ready()
+    for i, token in enumerate(tokens):
+        token_id = jnp.array(token)
+        pos = i  # Position in sequence
+
+        logits, Ks_cached, Vs_cached = forward_single(
+            token_id, params, pos, Ks_cached, Vs_cached
+        )
+        logits.block_until_ready()
     prefill_elapsed = time.perf_counter() - prefill_start
 
     print("Prompt processed.")
