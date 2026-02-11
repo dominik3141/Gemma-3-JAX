@@ -32,6 +32,9 @@ from core.gemma_forward import (
     postAttn,
 )
 
+IS_LOCAL_ATTN = get_gemma3_layer_types(config.num_layers)
+SQRT_D_MODEL = jnp.sqrt(jnp.asarray(config.d_model, dtype=jnp.float32))
+
 
 def group_attention_single(
     Ks: jax.Array,
@@ -101,20 +104,19 @@ def forward_single(
     x = params[f"{model_prefix}embed_tokens.weight"][x]
 
     # normalize according to Gemma reference implementation
-    x = jnp.sqrt(config.d_model) * x
+    x = SQRT_D_MODEL * x
 
     # single position should be wrapped in array to not confuse later vmaps
     pos = jnp.array(pos)
 
     # BLOCKS
     # Local/global attention pattern for Gemma 3
-    is_local_attn = get_gemma3_layer_types(config.num_layers)
     (x, _), (Ks_cached, Vs_cached) = jax.lax.scan(
         Block_KV_cached,
         (x, pos),
         (
             extract_block_params(params, model_prefix),
-            is_local_attn,
+            IS_LOCAL_ATTN,
             Ks_cached,
             Vs_cached,
         ),
