@@ -18,8 +18,6 @@ TODO:
     - Extract the logic that is shared among all forward functions to a separate file (RMSNorm etc.)
 """
 
-import os
-
 import jax
 import jax.numpy as jnp
 from core.gemma_forward import (
@@ -65,27 +63,23 @@ def Block_KV_cached(inits, scans) -> jax.Array:
 
     # make a copy of x to keep the residual
     x_og = x
-    with jax.named_scope("rmsnorm_in"):
-        x = RMSNorm(x, block_params["input_layernorm.weight"])
+    x = RMSNorm(x, block_params["input_layernorm.weight"])
 
     # Calculate comm vectors for new token
-    with jax.named_scope("qkv"):
-        K_new, V_new, Qs = calc_qkv(x, block_params, pos, is_local_attn)
+    K_new, V_new, Qs = calc_qkv(x, block_params, pos, is_local_attn)
 
     # Update fixed-size KV cache
     Ks = Ks_cached.at[pos].set(K_new)
     Vs = Vs_cached.at[pos].set(V_new)
 
     # COMMUNICATION WITH OTHER TOKENS
-    with jax.named_scope("attn"):
-        x = jax.vmap(
-            group_attention_single,
-            in_axes=(1, 1, 0, None, None),
-        )(Ks, Vs, Qs, pos, is_local_attn)
-        x = jnp.reshape(x, (config.num_attention_heads * config.d_kvq,))  # concat heads
+    x = jax.vmap(
+        group_attention_single,
+        in_axes=(1, 1, 0, None, None),
+    )(Ks, Vs, Qs, pos, is_local_attn)
+    x = jnp.reshape(x, (config.num_attention_heads * config.d_kvq,))  # concat heads
 
-    with jax.named_scope("post_attn"):
-        x = postAttn(x, x_og, block_params)
+    x = postAttn(x, x_og, block_params)
 
     return (x, pos), (Ks, Vs)
 
@@ -222,41 +216,6 @@ def main() -> None:
 
     print("Processing prompt (prefill)...")
     logits = None
-    trace_dir = os.environ.get("JAX_PROFILE_DIR")
-    trace_phase = os.environ.get("JAX_PROFILE_PHASE", "generation")
-    trace_start = int(os.environ.get("JAX_PROFILE_START", "0"))
-    trace_steps = int(os.environ.get("JAX_PROFILE_STEPS", "0"))
-    microprofile = int(os.environ.get("JAX_MICROPROFILE", "0"))
-    micro_steps = int(os.environ.get("JAX_MICROPROFILE_STEPS", "5"))
-    component_bench = int(os.environ.get("JAX_COMPONENT_BENCH", "0"))
-    component_iters = int(os.environ.get("JAX_COMPONENT_ITERS", "20"))
-    trace_active = False
-
-    prefill_dispatch = []
-    prefill_device = []
-    gen_dispatch = []
-    gen_device = []
-
-    def maybe_start_trace(phase: str, step: int) -> None:
-        nonlocal trace_active
-        if not trace_dir or phase != trace_phase or trace_active:
-            return
-        if trace_steps == 0 or step == trace_start:
-            jax.profiler.start_trace(trace_dir)
-            trace_active = True
-
-    def maybe_stop_trace(phase: str, step: int, final: bool = False) -> None:
-        nonlocal trace_active
-        if not trace_active:
-            return
-        if trace_steps == 0:
-            if final:
-                jax.profiler.stop_trace()
-                trace_active = False
-            return
-        if phase == trace_phase and step >= trace_start + trace_steps - 1:
-            jax.profiler.stop_trace()
-            trace_active = False
 
     # Warmup/compile outside measured timings to avoid one-time JIT cost in stats.
     _warmup_token = jnp.array(tokens[0])
@@ -268,94 +227,16 @@ def main() -> None:
     )
     _warmup_logits.block_until_ready()
 
-    if component_bench:
-        model_prefix = _model_prefix(params)
-        block_params = extract_block_params(params, model_prefix)
-        block_params0 = jax.tree_util.tree_map(lambda x: x[0], block_params)
-        is_local0 = get_gemma3_layer_types(config.num_layers)[0]
-
-        x_embed = params[f"{model_prefix}embed_tokens.weight"][tokens[0]]
-        x_embed = jnp.sqrt(config.d_model) * x_embed
-        pos0 = jnp.array(0)
-
-        @jax.jit
-        def bench_rmsnorm(x):
-            return RMSNorm(x, block_params0["input_layernorm.weight"])
-
-        @jax.jit
-        def bench_qkv(x):
-            return calc_qkv(x, block_params0, pos0, is_local0)
-
-        @jax.jit
-        def bench_attn(Ks, Vs, Qs):
-            x = jax.vmap(
-                group_attention_single,
-                in_axes=(1, 1, 0, None, None),
-            )(Ks, Vs, Qs, pos0, is_local0)
-            return jnp.reshape(x, (config.num_attention_heads * config.d_kvq,))
-
-        @jax.jit
-        def bench_post(x_attn, x_og):
-            return postAttn(x_attn, x_og, block_params0)
-
-        def block_ready(x):
-            jax.tree_util.tree_map(lambda y: y.block_until_ready(), x)
-
-        def time_fn(fn, *args):
-            out = fn(*args)
-            block_ready(out)
-            t0 = time.perf_counter()
-            for _ in range(component_iters):
-                out = fn(*args)
-            block_ready(out)
-            t1 = time.perf_counter()
-            return (t1 - t0) / component_iters
-
-        x_norm = bench_rmsnorm(x_embed)
-        K_new, V_new, Qs = bench_qkv(x_norm)
-        Ks0 = _warmup_K[0].at[0].set(K_new)
-        Vs0 = _warmup_V[0].at[0].set(V_new)
-        x_attn = bench_attn(Ks0, Vs0, Qs)
-
-        rms_t = time_fn(bench_rmsnorm, x_embed)
-        qkv_t = time_fn(bench_qkv, x_norm)
-        attn_t = time_fn(bench_attn, Ks0, Vs0, Qs)
-        post_t = time_fn(bench_post, x_attn, x_embed)
-        fwd_t = time_fn(forward_single, _warmup_token, params, _warmup_pos, _warmup_K, _warmup_V)
-
-        print("Component microbench (ms per call, averaged):")
-        print(f"  RMSNorm:   {rms_t*1000:.3f} ms")
-        print(f"  QKV:       {qkv_t*1000:.3f} ms")
-        print(f"  Attention: {attn_t*1000:.3f} ms")
-        print(f"  PostAttn:  {post_t*1000:.3f} ms")
-        print(f"  Forward:   {fwd_t*1000:.3f} ms")
-        approx_layer = (rms_t + qkv_t + attn_t + post_t) * config.num_layers * 1000
-        print(f"  Approx layers sum: {approx_layer:.3f} ms")
-        print(f"  Device (x_embed): {x_embed.device}")
-
     # Process each token in the prompt
     prefill_start = time.perf_counter()
     for i, token in enumerate(tokens):
         token_id = jnp.array(token)
         pos = i  # Position in sequence
 
-        maybe_start_trace("prefill", i)
-        if microprofile and i < micro_steps:
-            t0 = time.perf_counter()
-            logits, Ks_cached, Vs_cached = forward_single(
-                token_id, params, pos, Ks_cached, Vs_cached
-            )
-            t1 = time.perf_counter()
-            logits.block_until_ready()
-            t2 = time.perf_counter()
-            prefill_dispatch.append(t1 - t0)
-            prefill_device.append(t2 - t1)
-        else:
-            logits, Ks_cached, Vs_cached = forward_single(
-                token_id, params, pos, Ks_cached, Vs_cached
-            )
-            logits.block_until_ready()
-        maybe_stop_trace("prefill", i, final=(i == len(tokens) - 1))
+        logits, Ks_cached, Vs_cached = forward_single(
+            token_id, params, pos, Ks_cached, Vs_cached
+        )
+        logits.block_until_ready()
     prefill_elapsed = time.perf_counter() - prefill_start
 
     print("Prompt processed.")
@@ -368,7 +249,7 @@ def main() -> None:
     printed_trailing_newline = True
 
     generation_start = time.perf_counter()
-    for gen_step in range(max_new_tokens):
+    for _ in range(max_new_tokens):
         # Sample from logits (greedy)
         next_token = jnp.argmax(logits).item()
         generated_tokens.append(next_token)
@@ -381,24 +262,11 @@ def main() -> None:
 
         # Feed back
         token_id = jnp.array(next_token)
-        maybe_start_trace("generation", gen_step)
-        if microprofile and len(gen_dispatch) < micro_steps:
-            t0 = time.perf_counter()
-            logits, Ks_cached, Vs_cached = forward_single(
-                token_id, params, curr_pos, Ks_cached, Vs_cached
-            )
-            t1 = time.perf_counter()
-            logits.block_until_ready()
-            t2 = time.perf_counter()
-            gen_dispatch.append(t1 - t0)
-            gen_device.append(t2 - t1)
-        else:
-            logits, Ks_cached, Vs_cached = forward_single(
-                token_id, params, curr_pos, Ks_cached, Vs_cached
-            )
-            logits.block_until_ready()
+        logits, Ks_cached, Vs_cached = forward_single(
+            token_id, params, curr_pos, Ks_cached, Vs_cached
+        )
+        logits.block_until_ready()
         curr_pos += 1
-        maybe_stop_trace("generation", gen_step, final=(gen_step == max_new_tokens - 1))
     generation_elapsed = time.perf_counter() - generation_start
 
     if not printed_trailing_newline:
@@ -419,22 +287,6 @@ def main() -> None:
         f"Generation avg: {generation_avg_s_per_token:.4f}s/token "
         f"({generation_elapsed:.3f}s total for {len(generated_tokens)} tokens)"
     )
-
-    if microprofile:
-        import statistics as stats
-
-        def summarize(label: str, values: list[float]) -> None:
-            if not values:
-                return
-            mean = stats.mean(values)
-            stdev = stats.stdev(values) if len(values) > 1 else 0.0
-            print(f"{label}: {mean*1000:.3f}±{stdev*1000:.3f} ms")
-
-        print(f"Microprofile steps: {micro_steps}")
-        summarize("Prefill dispatch", prefill_dispatch)
-        summarize("Prefill device", prefill_device)
-        summarize("Generation dispatch", gen_dispatch)
-        summarize("Generation device", gen_device)
 
 
 if __name__ == "__main__":
