@@ -200,7 +200,7 @@ def main() -> None:
     # Initialize cache
     num_layers = config.num_layers
     head_dim = config.head_dim
-    kv_cache_len = max_new_tokens + len(tokens) + 1
+    kv_cache_len = 1024
 
     assert max_new_tokens + len(tokens) < kv_cache_len
 
