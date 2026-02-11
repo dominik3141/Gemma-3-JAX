@@ -65,17 +65,30 @@ def calc_qkv(
     # Prepare for attention
     theta = jnp.where(is_local_attn, 10_000.0, 1_000_000.0)
 
-    Ks = block_params["self_attn.k_proj.weight"] @ x
+    k_size = config.num_key_value_heads * config.head_dim
+    v_size = config.num_key_value_heads * config.d_kvq
+    q_size = config.num_key_value_heads * config.num_queries_per_group * config.d_kvq
+
+    qkv = jnp.concatenate(
+        [
+            block_params["self_attn.k_proj.weight"],
+            block_params["self_attn.v_proj.weight"],
+            block_params["self_attn.q_proj.weight"],
+        ],
+        axis=0,
+    ) @ x
+
+    Ks = qkv[:k_size]
     Ks = jnp.reshape(Ks, (config.num_key_value_heads, config.head_dim))
     Ks = jax.vmap(RMSNorm, in_axes=(0, None))(
         Ks, block_params["self_attn.k_norm.weight"]
     )
     Ks = jax.vmap(RoPE, in_axes=(0, None, None))(Ks, pos, theta)
 
-    Vs = block_params["self_attn.v_proj.weight"] @ x
+    Vs = qkv[k_size : k_size + v_size]
     Vs = jnp.reshape(Vs, (config.num_key_value_heads, config.d_kvq))
 
-    Qss = block_params["self_attn.q_proj.weight"] @ x
+    Qss = qkv[k_size + v_size : k_size + v_size + q_size]
     Qss = jnp.reshape(
         Qss,
         (config.num_key_value_heads * config.num_queries_per_group, config.d_kvq),
