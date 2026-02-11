@@ -4,3 +4,10 @@
 - For v5e (v5litepod) TPU VMs, use runtime version: `v2-alpha-tpuv5-lite`.
 - Using `tpu-ubuntu2204-base` (or other v4/older runtimes) on v5e causes TPU init instability and watchdog timeouts.
 - We have hit this multiple times. Always double check the runtime before creating a v5e TPU VM.
+
+## Internal IP egress pitfall (do not skip)
+- If TPU VMs are created with internal IPs only (`--internal-ips`), they do **not** have public internet egress by default.
+- To allow outbound internet access (pip installs, model downloads, etc.), configure **Cloud NAT** in that region, backed by a **Cloud Router**, on the TPU VPC/subnet.
+- `privateIpGoogleAccess: true` on the subnet is required for private access to Google APIs, but it is not a full internet egress replacement.
+- Cloud Router is effectively free; Cloud NAT can incur charges (NAT gateway/data processing/external NAT IP), so create NAT where needed and clean up unused NATs.
+- Example we already configured: router `trc-router-us-central1` + NAT `trc-nat-us-central1` in `us-central1` on network `default`.
