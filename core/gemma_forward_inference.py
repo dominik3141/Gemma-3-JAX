@@ -236,7 +236,7 @@ def main() -> None:
         logits, Ks_cached, Vs_cached = forward_single(
             token_id, params, pos, Ks_cached, Vs_cached
         )
-    logits.block_until_ready()
+        logits.block_until_ready()
     prefill_elapsed = time.perf_counter() - prefill_start
 
     print("Prompt processed.")
@@ -265,8 +265,8 @@ def main() -> None:
         logits, Ks_cached, Vs_cached = forward_single(
             token_id, params, curr_pos, Ks_cached, Vs_cached
         )
+        logits.block_until_ready()
         curr_pos += 1
-    logits.block_until_ready()
     generation_elapsed = time.perf_counter() - generation_start
 
     if not printed_trailing_newline:
