@@ -24,7 +24,6 @@ from core.gemma_forward import (
     Params,
     RMSNorm,
     _model_prefix,
-    attnHead,
     calc_qkv,
     config,
     extract_block_params,
@@ -43,12 +42,25 @@ def group_attention_single(
     """
     Group attention for a single token and a single KV head group.
     """
-    Qs = Qss[:, None, :]  # (num_queries_per_group, 1, d_kvq)
-    pos_array = jnp.array([pos])
-    xs = jax.vmap(attnHead, in_axes=(None, None, 0, None, None))(
-        Ks, Vs, Qs, pos_array, is_local_attn
-    )
-    xs = xs[:, 0, :]  # (num_queries_per_group, d_kvq)
+    # Qss: (num_queries_per_group, d_kvq)
+    seq_indices = jnp.arange(Ks.shape[0])
+    causal_mask = seq_indices <= pos
+
+    def _local_mask(_):
+        return causal_mask & ((pos - seq_indices) <= config.sliding_window)
+
+    def _global_mask(_):
+        return causal_mask
+
+    mask = jax.lax.cond(is_local_attn, _local_mask, _global_mask, operand=None)
+
+    # Batched attention: (num_queries, cache_len)
+    scores = (Qss @ Ks.T) / jnp.sqrt(Qss.shape[-1])
+    scores_f = scores.astype(jnp.float32)
+    scores_f = jnp.where(mask, scores_f, -jnp.inf)
+    weights = jax.nn.softmax(scores_f, axis=-1).astype(scores.dtype)
+
+    xs = weights @ Vs  # (num_queries_per_group, d_kvq)
     return jnp.reshape(xs, (config.num_queries_per_group * config.d_kvq,))
 
 
