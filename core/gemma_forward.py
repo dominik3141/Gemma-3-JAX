@@ -133,7 +133,7 @@ def AttnScores(
             idx_a - seq_indices <= config.sliding_window, scores, -jnp.inf
         )
 
-    return jax.nn.softmax(scores.astype(jnp.float32)).astype(scores.dtype)
+    return jax.nn.softmax(scores).astype(scores.dtype)
 
 
 def attnHead(Ks, Vs, Qs, pos_a, is_local_attn) -> jax.Array:
