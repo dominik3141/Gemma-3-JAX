@@ -44,7 +44,7 @@ def group_attention_single(
     Group attention for a single token and a single KV head group.
     """
     Qs = Qss[:, None, :]  # (num_queries_per_group, 1, d_kvq)
-    pos_array = pos[None]
+    pos_array = jnp.array([pos])
     xs = jax.vmap(attnHead, in_axes=(None, None, 0, None, None))(
         Ks, Vs, Qs, pos_array, is_local_attn
     )
