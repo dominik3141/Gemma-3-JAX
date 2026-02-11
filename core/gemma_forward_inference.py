@@ -118,6 +118,7 @@ def forward_single(
             Ks_cached,
             Vs_cached,
         ),
+        unroll=4,
     )
 
     # final norm
