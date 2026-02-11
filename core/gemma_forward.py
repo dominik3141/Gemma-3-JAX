@@ -15,8 +15,7 @@ def RMSNorm(x: jax.Array, gamma: jax.Array) -> jax.Array:
     # the weights for this norm are simply named '*layernorm*'
     # x and gamma should have the same shape
     epsilon = 1e-6
-    inv = jax.lax.rsqrt(jnp.mean(jnp.square(x)) + epsilon)
-    return x * inv * (1 + gamma)
+    return x / (jnp.sqrt(jnp.mean(jnp.square(x)) + epsilon)) * (1 + gamma)
 
 
 def RoPE(x: jax.Array, position: int, theta: float) -> jax.Array:
