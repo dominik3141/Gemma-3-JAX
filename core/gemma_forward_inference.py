@@ -23,7 +23,6 @@ import jax.numpy as jnp
 from core.gemma_forward import (
     Params,
     RMSNorm,
-    RoPE,
     _model_prefix,
     attnHead,
     config,
@@ -106,7 +105,6 @@ def calc_qkv_fused(
     Ks = jax.vmap(RMSNorm, in_axes=(0, None))(
         Ks, block_params["self_attn.k_norm.weight"]
     )
-    Ks = jax.vmap(RoPE, in_axes=(0, None, None))(Ks, pos, theta)
 
     Vs = jnp.reshape(Vs, (config.num_key_value_heads, config.d_kvq))
 
@@ -115,15 +113,41 @@ def calc_qkv_fused(
         (config.num_key_value_heads * config.num_queries_per_group, config.d_kvq),
     )
     Qss = jax.vmap(lambda Q: RMSNorm(Q, block_params["self_attn.q_norm.weight"]))(Qss)
-    Qss = jax.vmap(lambda Q, p, theta: RoPE(Q, p, theta), in_axes=(0, None, None))(
-        Qss, pos, theta
-    )
+
+    cos_k, sin_k = rope_cos_sin(config.head_dim, pos, theta)
+    if config.d_kvq == config.head_dim:
+        cos_q, sin_q = cos_k, sin_k
+    else:
+        cos_q, sin_q = rope_cos_sin(config.d_kvq, pos, theta)
+
+    Ks = apply_rope(Ks, cos_k, sin_k)
+    Qss = apply_rope(Qss, cos_q, sin_q)
     Qss = jnp.reshape(
         Qss,
         (config.num_key_value_heads, config.num_queries_per_group, config.d_kvq),
     )
 
     return Ks, Vs, Qss
+
+
+def rope_cos_sin(d: int, pos: jax.Array, theta: jax.Array) -> tuple[jax.Array, jax.Array]:
+    half = d // 2
+    idx = jnp.arange(0, d, 2, dtype=jnp.float32)
+    pos_f = jnp.asarray(pos, dtype=jnp.float32)
+    freqs = pos_f / (theta ** (idx / d))
+    return jnp.cos(freqs), jnp.sin(freqs)
+
+
+def apply_rope(x: jax.Array, cos: jax.Array, sin: jax.Array) -> jax.Array:
+    x_dtype = x.dtype
+    x_f = x.astype(jnp.float32)
+    half = x_f.shape[-1] // 2
+    x1 = x_f[..., :half]
+    x2 = x_f[..., half:]
+    y1 = x1 * cos - x2 * sin
+    y2 = x1 * sin + x2 * cos
+    y = jnp.concatenate([y1, y2], axis=-1)
+    return y.astype(x_dtype)
 
 
 def add_fused_qkv_params(params: Params) -> Params:
