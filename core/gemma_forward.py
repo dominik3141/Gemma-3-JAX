@@ -142,25 +142,20 @@ def attnHead(Ks, Vs, Qs, pos_a, is_local_attn) -> jax.Array:
     Z_a := \sum_b Attn(a,b) * V_b,
     where Attn(a,b) := softmax((Q_a K_b^T)/sqrt(d_k))
     """
-
-    def Attn(is_local_attn: bool, Ks, Vs, Qs, pos_a, seq_indices) -> jax.Array:
-        return jax.vmap(
-            lambda Ks, Vs, Q_a, idx_a, seq_indices: AttnScores(
-                Q_a, Ks, idx_a, seq_indices, is_local_attn
-            )
-            @ Vs,
-            in_axes=(None, None, 0, 0, None),
-        )(Ks, Vs, Qs, pos_a, seq_indices)
-
-    localAttn = partial(Attn, True)
-    globalAttn = partial(Attn, False)
-
+    d_k = Qs.shape[-1]
     seq_indices = jnp.arange(0, Ks.shape[0], 1)
-    Z_a = jax.lax.cond(
-        is_local_attn, localAttn, globalAttn, Ks, Vs, Qs, pos_a, seq_indices
-    )
 
-    return Z_a
+    scores = (Qs @ jnp.transpose(Ks)) / jnp.sqrt(d_k)
+    causal_mask = seq_indices[None, :] <= pos_a[:, None]
+    scores = jnp.where(causal_mask, scores, -jnp.inf)
+
+    def apply_local(scores):
+        local_mask = (pos_a[:, None] - seq_indices[None, :]) <= config.sliding_window
+        return jnp.where(local_mask, scores, -jnp.inf)
+
+    scores = jax.lax.cond(is_local_attn, apply_local, lambda s: s, scores)
+    probs = jax.nn.softmax(scores.astype(jnp.float32)).astype(scores.dtype)
+    return probs @ Vs
 
 
 def group_attention(
