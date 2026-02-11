@@ -27,27 +27,39 @@ LEARNING_RATE = (
 )  # as suggested by R1 paper
 ENABLE_PROFILER = False
 PROFILE_STOP_STEP = 5
+PROFILE_GCS_BUCKET = "gs://gemma-3-training-profiles-20260207-165411-1d9c5e"
+# Default behavior keeps one profile artifact set per run.
+# Set to True if you want profile uploads from every host.
+UPLOAD_ALL_HOST_PROFILES = False
 
 import re
 import math
 import random
 import os
 import socket
+import numpy as np
 import jax
 import jax.numpy as jnp
+import jax.experimental.multihost_utils as multihost_utils
 import optax
 import time
 import subprocess
 from core.gemma_forward import Params, forward
 from core.gemma_forward_inference import forward_single, get_KV
 from utils.gcp import log_text_async
-from utils.params_io import DEFAULT_ORBAX_CHECKPOINT, load_params, save_params
+from utils.params_io_27b import DEFAULT_ORBAX_CHECKPOINT, load_params, save_params
 from utils.tokenize_text import tokenize_text, detokenize_ids
 import utils.wandb_logging as wandb_logging
 import functools
 
 HOSTNAME = socket.gethostname()
 PID = os.getpid()
+
+
+def _profile_run_id() -> str:
+    local_run_id = np.int64(time.time())
+    shared_run_id = multihost_utils.broadcast_one_to_all(local_run_id)
+    return str(int(np.asarray(shared_run_id).item()))
 
 
 def sample_with_temp(
@@ -629,9 +641,12 @@ def main():
             "learning_rate": LEARNING_RATE,
         },
     )
+    profile_run_id = _profile_run_id() if ENABLE_PROFILER else None
     try:
         if ENABLE_PROFILER:
+            assert profile_run_id is not None
             print("Starting JAX profiler trace...")
+            print(f"Profile run id: {profile_run_id}")
             jax.profiler.start_trace("artifacts/profile")
 
         while True:
@@ -639,24 +654,54 @@ def main():
 
             # Profiling
             if ENABLE_PROFILER and i == PROFILE_STOP_STEP:
-                jax.profiler.stop_trace()
-                print("Stopped JAX profiler trace.")
+                try:
+                    jax.profiler.stop_trace()
+                    print("Stopped JAX profiler trace.")
+                except Exception as e:
+                    print(f"Failed to stop JAX profiler trace: {e}")
 
                 # Upload artifacts to GCS
                 try:
-                    timestamp = int(time.time())
                     process_index = jax.process_index()
-                    gcs_bucket = "gs://gemma-3-training-profiles-20260207-165411-1d9c5e"
-                    # Add process_index to path to avoid collisions between hosts
-                    destination = f"{gcs_bucket}/{timestamp}/host_{process_index}/"
-                    print(f"Uploading artifacts to {destination}...")
-                    subprocess.run(
-                        ["gsutil", "-m", "cp", "-r", "artifacts", destination],
-                        check=True,
-                    )
-                    print("Upload complete.")
+                    assert profile_run_id is not None
+                    if UPLOAD_ALL_HOST_PROFILES:
+                        destination = f"{PROFILE_GCS_BUCKET}/{profile_run_id}/host_{process_index}/"
+                    elif process_index == 0:
+                        destination = f"{PROFILE_GCS_BUCKET}/{profile_run_id}/"
+                    else:
+                        print(
+                            f"Skipping profile upload on host_{process_index}; host_0 uploads for this run."
+                        )
+                        destination = None
+
+                    if destination is not None and os.path.isdir("artifacts"):
+                        print(f"Uploading artifacts to {destination}...")
+                        result = subprocess.run(
+                            [
+                                "gsutil",
+                                "-m",
+                                "cp",
+                                "-c",
+                                "-r",
+                                "artifacts",
+                                destination,
+                            ],
+                            check=False,
+                        )
+                        if result.returncode == 0:
+                            print("Upload complete.")
+                        else:
+                            print(
+                                f"Profile upload finished with non-zero exit code ({result.returncode}); continuing training."
+                            )
+                    elif destination is not None:
+                        print(
+                            "No local artifacts directory found; skipping profile upload."
+                        )
                 except Exception as e:
-                    print(f"Failed to upload artifacts: {e}")
+                    print(
+                        f"Failed to upload artifacts (best effort, continuing training): {e}"
+                    )
 
             params, loss, format_pct, correct_pct, optimizer_state = train_loop(
                 key, params, params_ref, optimizer_state
