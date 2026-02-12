@@ -337,4 +337,3 @@ def forward(xs: jax.Array, params: Params) -> jax.Array:
     xs = xs @ params[f"{model_prefix}embed_tokens.weight"].T
 
     return xs
-

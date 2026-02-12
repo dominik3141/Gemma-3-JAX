@@ -1,7 +1,7 @@
 import jax.numpy as jnp
 
 from core.gemma_forward import forward
-from utils.params_io_27b import DEFAULT_ORBAX_CHECKPOINT, load_params
+from utils.params_io_1b import DEFAULT_ORBAX_CHECKPOINT, load_params
 
 
 def main():

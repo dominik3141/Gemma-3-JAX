@@ -2,7 +2,6 @@
 
 import time
 
-import jax
 import jax.numpy as jnp
 
 from core.gemma_forward import config

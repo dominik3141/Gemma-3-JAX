@@ -172,5 +172,3 @@ def get_KV(
     )
 
     return K_cache, V_cache
-
-

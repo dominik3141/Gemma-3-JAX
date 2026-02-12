@@ -93,7 +93,10 @@ _ASYNC_LOGGERS: dict[str, _AsyncLoggerState] = {}
 
 
 def _ensure_console_handler(root_logger: logging.Logger) -> None:
-    if any(getattr(handler, "_gemma_console_handler", False) for handler in root_logger.handlers):
+    if any(
+        getattr(handler, "_gemma_console_handler", False)
+        for handler in root_logger.handlers
+    ):
         return
 
     handler = logging.StreamHandler(stream=_ORIGINAL_STDERR)
@@ -109,7 +112,10 @@ def _ensure_gcp_handler(
     labels: dict[str, str],
     enable_gcp: bool,
 ) -> None:
-    if any(getattr(handler, "_gemma_gcp_handler", False) for handler in root_logger.handlers):
+    if any(
+        getattr(handler, "_gemma_gcp_handler", False)
+        for handler in root_logger.handlers
+    ):
         return
     if not enable_gcp:
         return
