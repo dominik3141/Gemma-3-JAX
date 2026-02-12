@@ -2,6 +2,7 @@
 
 import time
 
+import jax
 import jax.numpy as jnp
 
 from core.gemma_forward import config
@@ -24,8 +25,8 @@ def main() -> None:
     print(f"Prompt: '{prompt}'")
     print(f"Tokens: {tokens}")
 
-    max_new_tokens = 100
-    kv_cache_len = 1024
+    max_new_tokens = 200
+    kv_cache_len = 1024 + max_new_tokens
     assert max_new_tokens + len(tokens) < kv_cache_len
 
     Ks_cached = jnp.zeros(
@@ -49,15 +50,6 @@ def main() -> None:
 
     print("Processing prompt (prefill)...")
 
-    _warmup_token = jnp.array(tokens[0])
-    _warmup_pos = 0
-    _warmup_K = jnp.zeros_like(Ks_cached)
-    _warmup_V = jnp.zeros_like(Vs_cached)
-    _warmup_logits, _, _ = forward_single(
-        _warmup_token, params, _warmup_pos, _warmup_K, _warmup_V
-    )
-    _warmup_logits.block_until_ready()
-
     logits = None
     prefill_start = time.perf_counter()
     for i, token in enumerate(tokens):
@@ -73,28 +65,55 @@ def main() -> None:
 
     generated_tokens: list[int] = []
     curr_pos = len(tokens)
-    printed_trailing_newline = True
 
-    generation_start = time.perf_counter()
-    for _ in range(max_new_tokens):
-        next_token = int(jnp.argmax(logits).item())
-        generated_tokens.append(next_token)
-
-        token_text = detokenize_ids([next_token])
+    def token_callback(token_id):
+        token_val = int(token_id)
+        token_text = detokenize_ids([token_val])
         if token_text:
             print(token_text, end="", flush=True)
-            printed_trailing_newline = token_text.endswith("\n")
+        return jnp.array(token_val, dtype=jnp.int32)
 
-        token_id = jnp.array(next_token)
-        logits, Ks_cached, Vs_cached = forward_single(
-            token_id, params, curr_pos, Ks_cached, Vs_cached
+    def scan_body(carry, _):
+        logits, curr_pos, Ks, Vs = carry
+        next_token = jnp.argmax(logits).astype(jnp.int32)
+
+        # Print via callback
+        jax.experimental.io_callback(
+            token_callback,
+            jax.ShapeDtypeStruct((), jnp.int32),
+            next_token,
+            ordered=False,
         )
-        logits.block_until_ready()
-        curr_pos += 1
+
+        new_logits, new_Ks, new_Vs = forward_single(
+            next_token, params, curr_pos, Ks, Vs
+        )
+        return (new_logits, curr_pos + 1, new_Ks, new_Vs), next_token
+
+    def run_scan(init_carry):
+        return jax.lax.scan(scan_body, init_carry, None, length=max_new_tokens)
+
+    # Initial carry
+    init_carry = (logits, curr_pos, Ks_cached, Vs_cached)
+
+    # Measure compilation time for jitted scan
+    compile_start = time.perf_counter()
+    run_scan_jit = jax.jit(run_scan)
+    # Explicitly lower and compile to avoid running the computation
+    lowered = run_scan_jit.lower(init_carry)
+    compiled_scan = lowered.compile()
+    compile_elapsed = time.perf_counter() - compile_start
+    print(f"JIT compilation time: {compile_elapsed:.3f}s")
+
+    generation_start = time.perf_counter()
+
+    final_carry, generated_tokens_array = compiled_scan(init_carry)
+    logits, curr_pos, Ks_cached, Vs_cached = final_carry
+    generated_tokens_array.block_until_ready()
     generation_elapsed = time.perf_counter() - generation_start
 
-    if not printed_trailing_newline:
-        print()
+    generated_tokens = generated_tokens_array.tolist()
+    print()  # Ensure newline after streaming
 
     final_text = detokenize_ids(tokens + generated_tokens)
     print(f"Final output: {final_text}")
