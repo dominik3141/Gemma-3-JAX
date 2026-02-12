@@ -24,7 +24,7 @@ _EXCEPTION_HOOKS_INSTALLED = False
 
 
 def _should_enable_gcp_logging() -> bool:
-    if os.environ.get("GEMMA_DISABLE_GCP_LOGGING"):
+    if os.environ.get("GEMMA_RUNNING_LOCALLY"):
         return False
     return True
 
@@ -278,7 +278,7 @@ def init_logging(
 
     GCP handler behavior:
     - Cloud Logging is enabled by default.
-    - Set GEMMA_DISABLE_GCP_LOGGING to disable Cloud Logging.
+    - Set GEMMA_RUNNING_LOCALLY to disable Cloud Logging.
     """
     global _LOGGING_INITIALIZED
 
