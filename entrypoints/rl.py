@@ -23,6 +23,8 @@ from core.rl import (
 )
 from utils.params_io_27b import DEFAULT_ORBAX_CHECKPOINT, load_params, save_params
 
+REFERENCE_PARAMS_UPDATE_INTERVAL = 400  # as suggested by the R1 paper
+CHECKPOINT_INTERVAL = 25
 ENABLE_PROFILER = False
 PROFILE_STOP_STEP = 5
 PROFILE_GCS_BUCKET = "gs://gemma-3-training-profiles-20260207-165411-1d9c5e"
@@ -168,11 +170,11 @@ def main() -> None:
 
             i += 1
 
-            if i % 100 == 0:
+            if i % CHECKPOINT_INTERVAL == 0:
                 save_params(params)
                 LOGGER.info("Saved parameters")
 
-            if i % 400 == 0:
+            if i % REFERENCE_PARAMS_UPDATE_INTERVAL == 0:
                 params_ref = params
                 LOGGER.info("Updated reference parameters")
     finally:
