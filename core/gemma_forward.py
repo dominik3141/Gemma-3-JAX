@@ -5,7 +5,7 @@ All comments that include concrete dimensionality numbers are written with the 1
 import jax.numpy as jnp
 import jax
 from functools import partial
-from config.model import gemma_3_1b as config
+from config.model import gemma_3_27b as config
 
 
 Params = dict[str, jax.Array]
