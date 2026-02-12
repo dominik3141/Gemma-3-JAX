@@ -186,8 +186,23 @@ def _ensure_std_stream_capture() -> None:
     if _STD_STREAMS_CAPTURED:
         return
 
+    root_logger = logging.getLogger()
     stdout_logger = logging.getLogger("stdout")
     stderr_logger = logging.getLogger("stderr")
+
+    for capture_logger, level in (
+        (stdout_logger, logging.INFO),
+        (stderr_logger, logging.ERROR),
+    ):
+        capture_logger.handlers.clear()
+        capture_logger.setLevel(level)
+        capture_logger.propagate = False
+        capture_logger.addHandler(logging.NullHandler())
+        for handler in root_logger.handlers:
+            if getattr(handler, "_gemma_console_handler", False):
+                continue
+            capture_logger.addHandler(handler)
+
     sys.stdout = _StreamToLogger(_ORIGINAL_STDOUT, stdout_logger, logging.INFO)
     sys.stderr = _StreamToLogger(_ORIGINAL_STDERR, stderr_logger, logging.ERROR)
     _STD_STREAMS_CAPTURED = True
