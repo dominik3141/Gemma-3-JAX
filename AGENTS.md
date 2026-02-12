@@ -9,6 +9,9 @@
 - Using `tpu-ubuntu2204-base` (or other v4/older runtimes) on v5e causes TPU init instability and watchdog timeouts.
 - We have hit this multiple times. Always double check the runtime before creating a v5e TPU VM.
 
+## TPU v6e runtime reminder (do not skip)
+- For v6e TPU VMs, use runtime version: `v2-alpha-tpuv6e`.
+
 ## Internal IP egress pitfall (do not skip)
 - If TPU VMs are created with internal IPs only (`--internal-ips`), they do **not** have public internet egress by default.
 - To allow outbound internet access (pip installs, model downloads, etc.), configure **Cloud NAT** in that region, backed by a **Cloud Router**, on the TPU VPC/subnet.
