@@ -171,8 +171,11 @@ def main() -> None:
             i += 1
 
             if i % CHECKPOINT_INTERVAL == 0:
-                save_params(params)
-                LOGGER.info("Saved parameters")
+                try:
+                    save_params(params)
+                    LOGGER.info("Saved parameters")
+                except Exception as exc:
+                    LOGGER.warning("Failed to save parameters: %s", exc)
 
             if i % REFERENCE_PARAMS_UPDATE_INTERVAL == 0:
                 params_ref = params
