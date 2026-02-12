@@ -1,5 +1,9 @@
 # AGENTS
 
+## Commit policy (do not skip)
+- Agents must never create commits unless the user explicitly instructs them to commit.
+- Keep all modifications in the working tree (staged or unstaged) until direct approval is given.
+
 ## TPU v5e runtime reminder (do not skip)
 - For v5e (v5litepod) TPU VMs, use runtime version: `v2-alpha-tpuv5-lite`.
 - Using `tpu-ubuntu2204-base` (or other v4/older runtimes) on v5e causes TPU init instability and watchdog timeouts.

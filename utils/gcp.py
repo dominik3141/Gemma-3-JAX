@@ -2,8 +2,8 @@
 
 from dataclasses import dataclass
 import logging
+import os
 import queue
-import socket
 import sys
 import threading
 from typing import TextIO
@@ -23,13 +23,10 @@ _WARNINGS_CAPTURED = False
 _EXCEPTION_HOOKS_INSTALLED = False
 
 
-def is_gcp_machine() -> bool:
-    """Detect whether runtime is on GCP by probing metadata endpoint."""
-    try:
-        socket.create_connection(("metadata.google.internal", 80), timeout=0.5)
-        return True
-    except (socket.error, OSError, TimeoutError):
+def _should_enable_gcp_logging() -> bool:
+    if os.environ.get("GEMMA_DISABLE_GCP_LOGGING"):
         return False
+    return True
 
 
 class _StreamToLogger:
@@ -110,11 +107,11 @@ def _ensure_gcp_handler(
     root_logger: logging.Logger,
     log_name: str,
     labels: dict[str, str],
+    enable_gcp: bool,
 ) -> None:
     if any(getattr(handler, "_gemma_gcp_handler", False) for handler in root_logger.handlers):
         return
-    if not is_gcp_machine():
-        logging.getLogger(__name__).info("GCP metadata not found; Cloud Logging disabled")
+    if not enable_gcp:
         return
 
     try:
@@ -271,7 +268,12 @@ def init_logging(
     log_name: str = "gemma-3-training",
     labels: dict[str, str] | None = None,
 ) -> None:
-    """Initialize terminal + Cloud Logging and capture std streams/exceptions."""
+    """Initialize terminal + Cloud Logging and capture std streams/exceptions.
+
+    GCP handler behavior:
+    - Cloud Logging is enabled by default.
+    - Set GEMMA_DISABLE_GCP_LOGGING to disable Cloud Logging.
+    """
     global _LOGGING_INITIALIZED
 
     if labels is None:
@@ -283,7 +285,12 @@ def init_logging(
         root_logger.setLevel(_LOG_LEVEL)
         _LOGGING_INITIALIZED = True
 
-    _ensure_gcp_handler(root_logger, log_name=log_name, labels=labels)
+    _ensure_gcp_handler(
+        root_logger,
+        log_name=log_name,
+        labels=labels,
+        enable_gcp=_should_enable_gcp_logging(),
+    )
     _ensure_warning_capture()
     _ensure_exception_hooks()
     _ensure_std_stream_capture()
