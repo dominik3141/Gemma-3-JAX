@@ -24,8 +24,6 @@ TOKENIZER_ROOT = "gs://gemma-3-weights-231d4b-euw4/gemma-weights"
 TOKENIZER_DIR = "data/gemma-3-27b"
 TOKENIZER_FILES = [
     "tokenizer.model",
-    "tokenizer.json",
-    "tokenizer_config.json",
 ]
 TOKENIZER_SENTINEL = os.path.join(TOKENIZER_DIR, "tokenizer.model")
 
