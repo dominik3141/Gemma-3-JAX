@@ -338,18 +338,3 @@ def forward(xs: jax.Array, params: Params) -> jax.Array:
 
     return xs
 
-
-@jax.jit
-def main():
-    from utils.params_io_27b import DEFAULT_ORBAX_CHECKPOINT, load_params
-
-    params = load_params(DEFAULT_ORBAX_CHECKPOINT)
-    xs = jnp.array([2, 4237, 3234, 1293094])
-
-    xs = forward(xs, params)
-
-    return xs
-
-
-if __name__ == "__main__":
-    print(main())

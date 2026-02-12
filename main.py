@@ -93,11 +93,6 @@ if __name__ == "__main__":
     init_dist()
     configure_wandb_api_key_for_worker()
 
-    from core.rl import main
+    from entrypoints.rl import main
 
     main()
-
-    # lowered = jax.jit(main).lower()
-    # hlo_text = lowered.compile().as_text()
-
-    # print(hlo_text)

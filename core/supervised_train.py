@@ -19,13 +19,10 @@ But for now we just always take sequences of the same length to avoid this probl
 import jax
 import jax.numpy as jnp
 from core.gemma_forward import forward
-from utils.params_io import DEFAULT_ORBAX_CHECKPOINT, load_params
 import optax
 from core.gemma_forward import Params
 from utils.sft_data import get_training_sample
 from functools import partial
-from jax.sharding import Mesh, PartitionSpec, NamedSharding
-from jax.experimental import mesh_utils
 
 
 def loss_fn(xs, params) -> jax.Array:
@@ -60,49 +57,3 @@ def train_loop(data_sharding, batch_size, params, key) -> tuple[Params, jax.Arra
     new_params, loss = train(key, batch_size, params, 1024, 0.01, data_sharding)
 
     return new_params, loss
-
-
-# TESTING
-def main(num_batches=100):
-    print("--- supervised_train.main() started ---")
-    # keys and parameters
-    key = jax.random.key(42)
-
-    print("Loading weights...")
-
-    def _make_mesh() -> Mesh:
-        num_devices: int = jax.device_count()
-        model_axis_size = min(num_devices, 2)
-        batch_axis_size = num_devices // model_axis_size
-        device_mesh = mesh_utils.create_device_mesh((batch_axis_size, model_axis_size))
-        return Mesh(device_mesh, axis_names=("batch", "model"))
-
-    params, mesh = load_params(
-        DEFAULT_ORBAX_CHECKPOINT, mesh_factory=_make_mesh, return_mesh=True
-    )
-    print("Weights loaded.")
-
-    data_sharding = NamedSharding(mesh, PartitionSpec("batch"))
-
-    # Config
-    num_devices = mesh.devices.size
-    batch_size = num_devices * 2
-
-    # do stuff
-    keys = jax.random.split(key, num_devices * num_batches)
-
-    params, losses = jax.lax.scan(
-        partial(train_loop, data_sharding, batch_size),
-        params,
-        keys,
-    )
-
-    print("XLA returned control")
-    print(losses)
-
-    # Save params locally (optionally upload to GCS)
-    # from utils.save_params import save_params
-
-    # save_params(params, upload_to_gcs=False)
-
-    return params

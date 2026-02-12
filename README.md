@@ -6,9 +6,16 @@ All important files are in `core`, all other code is boring and maintained by AI
 ## Core files
 
 1. `gemma_forward.py`. Defines a very simple forward function, so far very optimized for prefill and not at all great for autoregressive sampling (no KV cache, no flash attention).
-2. `supervised_train.py` Simple next token prediction training using the forward pass.
-3. `rl.py` GRPO to recreate Deep Seek R1 Zero on the simple task of radicating integers (WIP).
-4. `gemma_forward_inference.py`. Uses KV caching to predict a single next token.
+2. `supervised_train.py` Simple next token prediction training utilities using the forward pass.
+3. `rl.py` GRPO training logic for radicating integers (WIP).
+4. `gemma_forward_inference.py` Inference forward logic (`forward_single`, KV cache prefill).
+
+## Entrypoints
+
+1. `entrypoints/rl.py` RL training script.
+2. `entrypoints/supervised.py` Supervised training script.
+3. `entrypoints/gemma_forward_inference.py` Inference runnable/test script (`main`).
+4. `entrypoints/gemma_forward.py` Forward-pass runnable/test script (`main`).
 
 ## Status
 
