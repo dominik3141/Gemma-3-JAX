@@ -31,7 +31,7 @@ DEFAULT_PROMPT = (
 
 
 def _ensure_tokenizer() -> None:
-    target = "data/gemma-3-27b/tokenizer.model"
+    target = "data/common/tokenizer.model"
     if os.path.exists(target):
         return
     raise FileNotFoundError(f"Tokenizer not found at {target}.")

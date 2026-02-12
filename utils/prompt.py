@@ -117,7 +117,7 @@ def cli_main() -> None:
     parser.add_argument(
         "--tokenizer",
         type=str,
-        default="data/gemma-3-27b/tokenizer.model",
+        default="data/common/tokenizer.model",
         help="Path to the SentencePiece tokenizer model.",
     )
     parser.add_argument(

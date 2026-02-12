@@ -21,7 +21,7 @@ import sys
 GIT_USER_NAME = "Dominik Farr"
 GIT_USER_EMAIL = "dominik.farr@icloud.com"
 TOKENIZER_ROOT = "gs://gemma-3-weights-231d4b-euw4/gemma-weights"
-TOKENIZER_DIR = "data/gemma-3-27b"
+TOKENIZER_DIR = "data/common"
 TOKENIZER_FILES = [
     "tokenizer.model",
 ]

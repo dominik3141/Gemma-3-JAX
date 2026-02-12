@@ -9,7 +9,7 @@ from functools import lru_cache
 import sentencepiece as spm
 
 
-_TOKENIZER_PATH = "data/gemma-3-1b/tokenizer.model"
+_TOKENIZER_PATH = "data/common/tokenizer.model"
 
 
 @lru_cache(maxsize=1)
