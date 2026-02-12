@@ -2,6 +2,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+import logging
 import os
 from typing import Final
 
@@ -14,8 +15,6 @@ os.environ["XLA_FLAGS"] = (
     " --xla_dump_hlo_as_proto"
 )
 
-import jax
-
 # os.environ["XLA_FLAGS"] = "--xla_force_host_platform_device_count=16"
 # print("Forcing the use of 16 devices.")
 
@@ -23,9 +22,12 @@ WANDB_SECRET_PROJECT: Final[str] = os.environ.get(
     "WANDB_SECRET_PROJECT", "default-482802"
 )
 WANDB_SECRET_NAME: Final[str] = os.environ.get("WANDB_SECRET_NAME", "wandb-api-key")
+LOGGER = logging.getLogger(__name__)
 
 
 def init_dist():
+    import jax
+
     try:
         jax.distributed.initialize()
     except (ValueError, RuntimeError):
@@ -40,6 +42,8 @@ def init_dist():
 
 
 def configure_wandb_api_key_for_worker() -> bool:
+    import jax
+
     process_index = jax.process_index()
 
     if process_index != 0:
@@ -85,9 +89,10 @@ def configure_wandb_api_key_for_worker() -> bool:
 
 
 if __name__ == "__main__":
-    from utils.gcp import init_gcp_logging
+    from utils.gcp import init_logging
 
-    init_gcp_logging()
+    init_logging(log_name="gemma-3-training")
+    LOGGER.info("Logging initialized")
 
     # must be called before any importing anything that might use JAX
     init_dist()
