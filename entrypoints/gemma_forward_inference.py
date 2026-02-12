@@ -16,12 +16,12 @@ from utils.params_io_27b import DEFAULT_ORBAX_CHECKPOINT, load_params
 from utils.tokenize_text import detokenize_ids, tokenize_text
 import utils.wandb_logging as wandb_logging
 
-ENABLE_PROFILER = False
+ENABLE_PROFILER = True
 PROFILE_GCS_BUCKET = "gs://gemma-3-training-profiles-20260207-165411-1d9c5e-euw4"
 PROFILE_TRACE_DIR = "artifacts/profile"
 # Default behavior keeps one profile artifact set per run.
 # Set to True if you want profile uploads from every host.
-UPLOAD_ALL_HOST_PROFILES = False
+UPLOAD_ALL_HOST_PROFILES = True
 LOGGER = logging.getLogger(__name__)
 
 

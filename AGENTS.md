@@ -4,6 +4,17 @@
 - Agents must never create commits unless the user explicitly instructs them to commit.
 - Keep all modifications in the working tree (staged or unstaged) until direct approval is given.
 
+## Working style preferences (do not skip)
+- Prefer simple defaults over optional configuration when there is one clear team path.
+- Avoid adding flags/options "just in case" if they are unlikely to be used.
+- For recurring ops workflows, hardcode practical project defaults instead of requiring repeated manual args.
+- When the user asks to "set it up", execute the infra/app setup directly and verify it works end-to-end.
+
+## Agent memory hygiene (do not skip)
+- If you discover a durable, high-signal preference or workflow pattern that will help future agents succeed, add it to this file without waiting to be asked.
+- Only add genuinely useful learnings; do not add one-off incidents, temporary context, or obvious noise.
+- Keep additions concise and actionable.
+
 ## TPU v5e runtime reminder (do not skip)
 - For v5e (v5litepod) TPU VMs, use runtime version: `v2-alpha-tpuv5-lite`.
 - Using `tpu-ubuntu2204-base` (or other v4/older runtimes) on v5e causes TPU init instability and watchdog timeouts.
