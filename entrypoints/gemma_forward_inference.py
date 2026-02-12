@@ -1,4 +1,4 @@
-"""Inference script entrypoint for single-token cached forward generation."""
+"""Inference script entrypoint for batched cached forward generation."""
 
 import logging
 import os
@@ -92,7 +92,7 @@ def _maybe_upload_profile_artifacts(profile_run_id: str) -> None:
 
 
 def main() -> None:
-    max_new_tokens = 2000
+    max_new_tokens = 400
     profile_run_id = _profile_run_id() if ENABLE_PROFILER else None
     profiler_started = False
 
@@ -120,79 +120,93 @@ def main() -> None:
             params = load_params(DEFAULT_ORBAX_CHECKPOINT)
         print("Weights loaded.")
 
-        prompt = "The capital of France is Paris. The capital of Germany is"
-        tokens = tokenize_text(prompt)
+        prompts = [
+            "The capital of France is Paris. The capital of Germany is",
+            "The capital of France is Paris. The capital of Italy is",
+            "The capital of France is Paris. The capital of Spain is",
+            "The capital of France is Paris. The capital of Portugal is",
+        ]
 
-        if tokens[0] != 2:
-            tokens = [2] + tokens
+        prompt_tokens_batch: list[list[int]] = []
+        for prompt_idx, prompt in enumerate(prompts):
+            tokens = tokenize_text(prompt)
+            if not tokens or tokens[0] != 2:
+                tokens = [2] + tokens
+            prompt_tokens_batch.append(tokens)
+            print(f"Prompt {prompt_idx}: '{prompt}'")
+            print(f"Prompt {prompt_idx} tokens ({len(tokens)}): {tokens}")
 
-        print(f"Prompt: '{prompt}'")
-        print(f"Tokens: {tokens}")
+        batch_size = len(prompt_tokens_batch)
+        max_prompt_tokens = max(len(tokens) for tokens in prompt_tokens_batch)
 
         kv_cache_len = 1024 + max_new_tokens
-        assert max_new_tokens + len(tokens) < kv_cache_len
+        assert max_new_tokens + max_prompt_tokens < kv_cache_len
 
-        Ks_cached = jnp.zeros(
-            (
-                config.num_layers,
-                kv_cache_len,
-                config.num_key_value_heads,
-                config.head_dim,
-            ),
-            dtype=jnp.bfloat16,
-        )
-        Vs_cached = jnp.zeros(
-            (
-                config.num_layers,
-                kv_cache_len,
-                config.num_key_value_heads,
-                config.d_kvq,
-            ),
-            dtype=jnp.bfloat16,
-        )
+        print("Processing prompts (prefill)...")
 
-        print("Processing prompt (prefill)...")
+        prefill_logits_per_prompt: list[jax.Array] = []
+        Ks_cached_per_prompt: list[jax.Array] = []
+        Vs_cached_per_prompt: list[jax.Array] = []
+        prompt_lengths: list[int] = []
 
-        logits = None
         prefill_start = time.perf_counter()
         with jax.profiler.TraceAnnotation("inference/prefill"):
-            for i, token in enumerate(tokens):
-                token_id = jnp.array(token)
-                logits, Ks_cached, Vs_cached = forward_single(
-                    token_id, params, i, Ks_cached, Vs_cached
+            for prompt_tokens in prompt_tokens_batch:
+                Ks_cached = jnp.zeros(
+                    (
+                        config.num_layers,
+                        kv_cache_len,
+                        config.num_key_value_heads,
+                        config.head_dim,
+                    ),
+                    dtype=jnp.bfloat16,
                 )
+                Vs_cached = jnp.zeros(
+                    (
+                        config.num_layers,
+                        kv_cache_len,
+                        config.num_key_value_heads,
+                        config.d_kvq,
+                    ),
+                    dtype=jnp.bfloat16,
+                )
+
+                logits = None
+                for pos, token in enumerate(prompt_tokens):
+                    token_id = jnp.array(token, dtype=jnp.int32)
+                    logits, Ks_cached, Vs_cached = forward_single(
+                        token_id, params, pos, Ks_cached, Vs_cached
+                    )
+                assert logits is not None
                 logits.block_until_ready()
+
+                prefill_logits_per_prompt.append(logits)
+                Ks_cached_per_prompt.append(Ks_cached)
+                Vs_cached_per_prompt.append(Vs_cached)
+                prompt_lengths.append(len(prompt_tokens))
         prefill_elapsed = time.perf_counter() - prefill_start
 
-        print("Prompt processed.")
-        print("Generating:")
+        logits = jnp.stack(prefill_logits_per_prompt, axis=0)
+        Ks_cached = jnp.stack(Ks_cached_per_prompt, axis=0)
+        Vs_cached = jnp.stack(Vs_cached_per_prompt, axis=0)
 
-        generated_tokens: list[int] = []
-        curr_pos = len(tokens)
+        print("Prompts processed.")
+        print("Generating batched completions...")
 
-        def token_callback(token_id):
-            token_val = int(token_id)
-            token_text = detokenize_ids([token_val])
-            if token_text:
-                print(token_text, end="", flush=True)
-            return jnp.array(token_val, dtype=jnp.int32)
+        curr_pos = jnp.array(prompt_lengths, dtype=jnp.int32)
+
+        def forward_single_batch(token_ids, params, pos, Ks_cached, Vs_cached):
+            return jax.vmap(forward_single, in_axes=(0, None, 0, 0, 0))(
+                token_ids, params, pos, Ks_cached, Vs_cached
+            )
 
         def scan_body(params, carry, _):
             logits, curr_pos, Ks, Vs = carry
-            next_token = jnp.argmax(logits).astype(jnp.int32)
-
-            # Print via callback
-            jax.experimental.io_callback(
-                token_callback,
-                jax.ShapeDtypeStruct((), jnp.int32),
-                next_token,
-                ordered=False,
+            next_tokens = jnp.argmax(logits, axis=-1).astype(jnp.int32)
+            new_logits, new_Ks, new_Vs = forward_single_batch(
+                next_tokens, params, curr_pos, Ks, Vs
             )
-
-            new_logits, new_Ks, new_Vs = forward_single(
-                next_token, params, curr_pos, Ks, Vs
-            )
-            return (new_logits, curr_pos + 1, new_Ks, new_Vs), next_token
+            return (new_logits, curr_pos + 1, new_Ks, new_Vs), next_tokens
 
         def run_scan(params, init_carry):
             return jax.lax.scan(
@@ -222,30 +236,48 @@ def main() -> None:
             generated_tokens_array.block_until_ready()
         generation_elapsed = time.perf_counter() - generation_start
 
-        generated_tokens = generated_tokens_array.tolist()
-        print()  # Ensure newline after streaming
+        generated_tokens_batch = np.asarray(generated_tokens_array).T.tolist()
 
-        final_text = detokenize_ids(tokens + generated_tokens)
-        print(f"Final output: {final_text}")
+        for prompt_idx, (prompt_tokens, generated_tokens) in enumerate(
+            zip(prompt_tokens_batch, generated_tokens_batch)
+        ):
+            final_text = detokenize_ids(prompt_tokens + generated_tokens)
+            print(f"Final output {prompt_idx}: {final_text}")
+
+        total_prefill_tokens = sum(prompt_lengths)
+        total_generated_tokens = sum(len(tokens) for tokens in generated_tokens_batch)
 
         prefill_tokens_per_s = (
-            len(tokens) / prefill_elapsed if prefill_elapsed > 0 else 0.0
+            total_prefill_tokens / prefill_elapsed if prefill_elapsed > 0 else 0.0
         )
-        generation_tokens_per_s = (
-            len(generated_tokens) / generation_elapsed
-            if generation_elapsed > 0 and generated_tokens
+        generation_tokens_per_s_batch = (
+            total_generated_tokens / generation_elapsed
+            if generation_elapsed > 0
             else 0.0
         )
-        print(
-            f"Prefill avg: {prefill_tokens_per_s:.1f} tokens/s "
-            f"({prefill_elapsed:.3f}s total for {len(tokens)} tokens)"
+        generation_tokens_per_s_per_prompt = (
+            generation_tokens_per_s_batch / batch_size if batch_size > 0 else 0.0
         )
         print(
-            f"Generation avg: {generation_tokens_per_s:.1f} tokens/s "
-            f"({generation_elapsed:.3f}s total for {len(generated_tokens)} tokens)"
+            f"Prefill avg (batch): {prefill_tokens_per_s:.1f} tokens/s "
+            f"({prefill_elapsed:.3f}s total for {total_prefill_tokens} tokens)"
+        )
+        print(
+            f"Generation avg (batch): {generation_tokens_per_s_batch:.1f} tokens/s "
+            f"({generation_elapsed:.3f}s total for {total_generated_tokens} tokens)"
+        )
+        print(
+            f"Generation avg (per prompt): {generation_tokens_per_s_per_prompt:.1f} tokens/s "
+            f"(batch_size={batch_size})"
         )
         wandb_logging.log_metrics(
-            {"inference/tokens_per_second": float(generation_tokens_per_s)},
+            {
+                "inference/tokens_per_second": float(generation_tokens_per_s_batch),
+                "inference/tokens_per_second_per_prompt": float(
+                    generation_tokens_per_s_per_prompt
+                ),
+                "inference/batch_size": float(batch_size),
+            },
             step=0,
         )
     finally:
