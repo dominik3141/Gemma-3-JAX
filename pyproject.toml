@@ -3,7 +3,7 @@ name = "jax-gemma-1b"
 version = "0.1.0"
 description = "Add your description here"
 readme = "README.md"
-requires-python = ">=3.11"
+requires-python = ">=3.13"
 dependencies = [
     "jax>=0.8.2",
     "orbax-checkpoint>=0.5.16",
@@ -25,6 +25,7 @@ dependencies = [
 [project.optional-dependencies]
 cuda = ["jax[cuda12]>=0.8.2"]
 tpu = ["jax[tpu]>=0.8.2", "tpu-info"]
+mps = ["jax-mps>=0.9.5"]
 
 [tool.ruff.lint]
 ignore = ["E402"]

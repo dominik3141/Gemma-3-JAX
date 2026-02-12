@@ -24,7 +24,7 @@ def main() -> None:
     print(f"Prompt: '{prompt}'")
     print(f"Tokens: {tokens}")
 
-    max_new_tokens = 1000
+    max_new_tokens = 100
     kv_cache_len = 1024
     assert max_new_tokens + len(tokens) < kv_cache_len
 
@@ -99,16 +99,18 @@ def main() -> None:
     final_text = detokenize_ids(tokens + generated_tokens)
     print(f"Final output: {final_text}")
 
-    prefill_avg_s_per_token = prefill_elapsed / len(tokens) if tokens else 0.0
-    generation_avg_s_per_token = (
-        generation_elapsed / len(generated_tokens) if generated_tokens else 0.0
+    prefill_tokens_per_s = len(tokens) / prefill_elapsed if prefill_elapsed > 0 else 0.0
+    generation_tokens_per_s = (
+        len(generated_tokens) / generation_elapsed
+        if generation_elapsed > 0 and generated_tokens
+        else 0.0
     )
     print(
-        f"Prefill avg: {prefill_avg_s_per_token:.4f}s/token "
+        f"Prefill avg: {prefill_tokens_per_s:.1f} tokens/s "
         f"({prefill_elapsed:.3f}s total for {len(tokens)} tokens)"
     )
     print(
-        f"Generation avg: {generation_avg_s_per_token:.4f}s/token "
+        f"Generation avg: {generation_tokens_per_s:.1f} tokens/s "
         f"({generation_elapsed:.3f}s total for {len(generated_tokens)} tokens)"
     )
 
