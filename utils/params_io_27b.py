@@ -290,10 +290,9 @@ def load_params(
 
 def save_params(
     params: dict[str, jax.Array],
-    checkpoint_root: str = DEFAULT_GCS_SAVE_ROOT,
 ) -> str:
     checkpoint_id = uuid.uuid4().hex
-    checkpoint_path = _join_checkpoint_path(checkpoint_root, checkpoint_id)
+    checkpoint_path = _join_checkpoint_path(DEFAULT_GCS_SAVE_ROOT, checkpoint_id)
     ckptr = ocp.StandardCheckpointer()
     ckptr.save(checkpoint_path, params)
     return checkpoint_path

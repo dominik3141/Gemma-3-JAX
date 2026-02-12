@@ -169,7 +169,7 @@ def main() -> None:
             i += 1
 
             if i % 100 == 0:
-                save_params(params, checkpoint_root="checkpoints")
+                save_params(params)
                 LOGGER.info("Saved parameters")
 
             if i % 400 == 0:
