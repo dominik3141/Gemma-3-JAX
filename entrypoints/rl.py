@@ -27,7 +27,7 @@ REFERENCE_PARAMS_UPDATE_INTERVAL = 400  # as suggested by the R1 paper
 CHECKPOINT_INTERVAL = 25
 ENABLE_PROFILER = False
 PROFILE_STOP_STEP = 5
-PROFILE_GCS_BUCKET = "gs://gemma-3-training-profiles-20260207-165411-1d9c5e"
+PROFILE_GCS_BUCKET = "gs://gemma-3-training-profiles-20260207-165411-1d9c5e-euw4"
 # Default behavior keeps one profile artifact set per run.
 # Set to True if you want profile uploads from every host.
 UPLOAD_ALL_HOST_PROFILES = False

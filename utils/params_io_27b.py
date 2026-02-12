@@ -16,7 +16,7 @@ from jax.experimental import multihost_utils
 
 
 DEFAULT_ORBAX_CHECKPOINT = "gs://gemma-3-27b-pt-orbax-b76114af/gemma-3-27b-pt-orbax"
-DEFAULT_GCS_SAVE_ROOT = "gs://gemma-tpu-weights-us-west4-482802/checkpoints"
+DEFAULT_GCS_SAVE_ROOT = "gs://gemma-tpu-weights-us-west4-482802-euw4/checkpoints"
 
 
 def _normalize_spec_for_rank(

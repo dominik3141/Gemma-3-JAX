@@ -15,3 +15,12 @@
 - `privateIpGoogleAccess: true` on the subnet is required for private access to Google APIs, but it is not a full internet egress replacement.
 - Cloud Router is effectively free; Cloud NAT can incur charges (NAT gateway/data processing/external NAT IP), so create NAT where needed and clean up unused NATs.
 - Example we already configured: router `trc-router-us-central1` + NAT `trc-nat-us-central1` in `us-central1` on network `default`.
+
+## GCS bucket policy preference (do not skip)
+- Prefer **uniform bucket-level access** for all buckets.
+- Do not use fine-grained object ACLs unless explicitly requested for a specific bucket.
+- When creating buckets via `gcloud storage buckets create`, include `--uniform-bucket-level-access`.
+
+## Default region (do not skip)
+- Default GCP region for new resources is `europe-west4`.
+- Default TPU zone is `europe-west4-b` unless explicitly overridden.
