@@ -31,14 +31,14 @@ def init_dist():
     try:
         jax.distributed.initialize()
     except (ValueError, RuntimeError):
-        print("Single host mode")
+        LOGGER.info("Single host mode")
 
     # Distributed training
     num_devices: int = jax.device_count()
-    print(f"Number of devices: {num_devices}")
-    print(f"Devices: {jax.devices()}")
-    print(f"Local devices: {jax.local_devices()}")
-    print(f"Backend: {jax.default_backend()}")
+    LOGGER.info("Number of devices: %s", num_devices)
+    LOGGER.info("Devices: %s", jax.devices())
+    LOGGER.info("Local devices: %s", jax.local_devices())
+    LOGGER.info("Backend: %s", jax.default_backend())
 
 
 def configure_wandb_api_key_for_worker() -> bool:
@@ -61,9 +61,10 @@ def configure_wandb_api_key_for_worker() -> bool:
     try:
         from google.cloud import secretmanager
     except Exception as exc:
-        print(
+        LOGGER.warning(
             "google-cloud-secret-manager unavailable in current environment; "
-            f"could not load WANDB_API_KEY: {exc}"
+            "could not load WANDB_API_KEY: %s",
+            exc,
         )
         return False
 
@@ -75,15 +76,18 @@ def configure_wandb_api_key_for_worker() -> bool:
             raise RuntimeError("Secret payload is empty")
 
         os.environ["WANDB_API_KEY"] = api_key
-        print(
-            f"Loaded WANDB_API_KEY from Secret Manager "
-            f"({WANDB_SECRET_PROJECT}/{WANDB_SECRET_NAME})."
+        LOGGER.info(
+            "Loaded WANDB_API_KEY from Secret Manager (%s/%s).",
+            WANDB_SECRET_PROJECT,
+            WANDB_SECRET_NAME,
         )
         return True
     except Exception as exc:
-        print(
-            f"Failed to load WANDB_API_KEY from Secret Manager "
-            f"({WANDB_SECRET_PROJECT}/{WANDB_SECRET_NAME}): {exc}"
+        LOGGER.warning(
+            "Failed to load WANDB_API_KEY from Secret Manager (%s/%s): %s",
+            WANDB_SECRET_PROJECT,
+            WANDB_SECRET_NAME,
+            exc,
         )
         return False
 

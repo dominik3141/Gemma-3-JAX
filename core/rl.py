@@ -29,6 +29,7 @@ LEARNING_RATE = (
 import re
 import math
 import random
+import logging
 import os
 import socket
 import jax
@@ -43,6 +44,7 @@ import functools
 
 HOSTNAME = socket.gethostname()
 PID = os.getpid()
+LOGGER = logging.getLogger(__name__)
 
 
 def sample_with_temp(
@@ -269,7 +271,7 @@ def _impure_reward_fn(
                 }
             )
         except Exception as e:
-            print(f"Error logging training sample: {e}")
+            LOGGER.warning("Error logging training sample: %s", e)
 
     return float(reward), float(format_score), float(correctness_score), int(end_pos)
 

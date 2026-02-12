@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import logging
 from typing import Any, Mapping
 import os
 
@@ -16,6 +17,7 @@ class WandbState:
 
 
 _STATE = WandbState(run=None, enabled=False, process_index=-1, step=0)
+LOGGER = logging.getLogger(__name__)
 
 
 def _disable_state(process_index: int | None = None) -> None:
@@ -46,14 +48,14 @@ def init_wandb(
         return _STATE.run
 
     if not os.environ.get("WANDB_API_KEY"):
-        print("WANDB_API_KEY not set; W&B disabled.")
+        LOGGER.info("WANDB_API_KEY not set; W&B disabled.")
         _disable_state(process_index=process_index)
         return None
 
     try:
         import wandb
     except Exception as exc:
-        print(f"Failed to import wandb: {exc}")
+        LOGGER.warning("Failed to import wandb: %s", exc)
         _disable_state(process_index=process_index)
         return None
 
@@ -67,7 +69,7 @@ def init_wandb(
             settings=settings,
         )
     except Exception as exc:
-        print(f"W&B init failed: {exc}")
+        LOGGER.warning("W&B init failed: %s", exc)
         _disable_state(process_index=process_index)
         return None
 
@@ -91,7 +93,7 @@ def log_metrics(metrics: Mapping[str, Any], step: int | None = None) -> None:
 
         wandb.log(dict(metrics), step=use_step)
     except Exception as exc:
-        print(f"W&B log failed: {exc}")
+        LOGGER.warning("W&B log failed: %s", exc)
 
 
 def log_sample(sample: Mapping[str, Any], step: int | None = None) -> None:
@@ -112,7 +114,7 @@ def log_sample(sample: Mapping[str, Any], step: int | None = None) -> None:
         table = wandb.Table(columns=columns, data=[row])
         wandb.log({"samples": table}, step=use_step)
     except Exception as exc:
-        print(f"W&B sample log failed: {exc}")
+        LOGGER.warning("W&B sample log failed: %s", exc)
 
 
 def finish_wandb() -> None:
@@ -123,6 +125,6 @@ def finish_wandb() -> None:
         if _STATE.run is not None:
             _STATE.run.finish()
     except Exception as exc:
-        print(f"W&B finish failed: {exc}")
+        LOGGER.warning("W&B finish failed: %s", exc)
     finally:
         _disable_state()

@@ -1,3 +1,4 @@
+import logging
 import os
 import subprocess
 import time
@@ -28,12 +29,22 @@ PROFILE_GCS_BUCKET = "gs://gemma-3-training-profiles-20260207-165411-1d9c5e"
 # Default behavior keeps one profile artifact set per run.
 # Set to True if you want profile uploads from every host.
 UPLOAD_ALL_HOST_PROFILES = False
+LOGGER = logging.getLogger(__name__)
 
 
 def _profile_run_id() -> str:
     local_run_id = np.int64(time.time())
     shared_run_id = multihost_utils.broadcast_one_to_all(local_run_id)
     return str(int(np.asarray(shared_run_id).item()))
+
+
+def _log_completed_process_output(result: subprocess.CompletedProcess[str]) -> None:
+    for line in result.stdout.splitlines():
+        if line.strip():
+            LOGGER.info("[gsutil stdout] %s", line)
+    for line in result.stderr.splitlines():
+        if line.strip():
+            LOGGER.warning("[gsutil stderr] %s", line)
 
 
 def _maybe_upload_profile_artifacts(profile_run_id: str) -> None:
@@ -44,13 +55,14 @@ def _maybe_upload_profile_artifacts(profile_run_id: str) -> None:
         elif process_index == 0:
             destination = f"{PROFILE_GCS_BUCKET}/{profile_run_id}/"
         else:
-            print(
-                f"Skipping profile upload on host_{process_index}; host_0 uploads for this run."
+            LOGGER.info(
+                "Skipping profile upload on host_%s; host_0 uploads for this run.",
+                process_index,
             )
             destination = None
 
         if destination is not None and os.path.isdir("artifacts"):
-            print(f"Uploading artifacts to {destination}...")
+            LOGGER.info("Uploading artifacts to %s...", destination)
             result = subprocess.run(
                 [
                     "gsutil",
@@ -62,17 +74,24 @@ def _maybe_upload_profile_artifacts(profile_run_id: str) -> None:
                     destination,
                 ],
                 check=False,
+                capture_output=True,
+                text=True,
             )
+            _log_completed_process_output(result)
             if result.returncode == 0:
-                print("Upload complete.")
+                LOGGER.info("Upload complete.")
             else:
-                print(
-                    f"Profile upload finished with non-zero exit code ({result.returncode}); continuing training."
+                LOGGER.warning(
+                    "Profile upload finished with non-zero exit code (%s); continuing training.",
+                    result.returncode,
                 )
         elif destination is not None:
-            print("No local artifacts directory found; skipping profile upload.")
+            LOGGER.info("No local artifacts directory found; skipping profile upload.")
     except Exception as exc:
-        print(f"Failed to upload artifacts (best effort, continuing training): {exc}")
+        LOGGER.warning(
+            "Failed to upload artifacts (best effort, continuing training): %s",
+            exc,
+        )
 
 
 def main() -> None:
@@ -106,8 +125,8 @@ def main() -> None:
     try:
         if ENABLE_PROFILER:
             assert profile_run_id is not None
-            print("Starting JAX profiler trace...")
-            print(f"Profile run id: {profile_run_id}")
+            LOGGER.info("Starting JAX profiler trace...")
+            LOGGER.info("Profile run id: %s", profile_run_id)
             jax.profiler.start_trace("artifacts/profile")
 
         while True:
@@ -116,9 +135,9 @@ def main() -> None:
             if ENABLE_PROFILER and i == PROFILE_STOP_STEP:
                 try:
                     jax.profiler.stop_trace()
-                    print("Stopped JAX profiler trace.")
+                    LOGGER.info("Stopped JAX profiler trace.")
                 except Exception as exc:
-                    print(f"Failed to stop JAX profiler trace: {exc}")
+                    LOGGER.warning("Failed to stop JAX profiler trace: %s", exc)
 
                 assert profile_run_id is not None
                 _maybe_upload_profile_artifacts(profile_run_id)
@@ -131,8 +150,12 @@ def main() -> None:
                 (loss, format_pct, correct_pct)
             )
 
-            print(
-                f"{i}, Loss: {loss}, Format: {format_pct * 100:.2f}%, Correct: {correct_pct * 100:.2f}%"
+            LOGGER.info(
+                "%s, Loss: %s, Format: %.2f%%, Correct: %.2f%%",
+                i,
+                loss,
+                format_pct * 100,
+                correct_pct * 100,
             )
             wandb_logging.log_metrics(
                 {
@@ -147,17 +170,17 @@ def main() -> None:
 
             if i % 100 == 0:
                 save_params(params, checkpoint_root="checkpoints")
-                print("Saved parameters")
+                LOGGER.info("Saved parameters")
 
             if i % 400 == 0:
                 params_ref = params
-                print("Updated reference parameters")
+                LOGGER.info("Updated reference parameters")
     finally:
         try:
             save_params(params)
-            print("Uploaded final parameters")
+            LOGGER.info("Uploaded final parameters")
         except Exception as exc:
-            print(f"Failed to upload final parameters: {exc}")
+            LOGGER.warning("Failed to upload final parameters: %s", exc)
         finally:
             wandb_logging.finish_wandb()
 
