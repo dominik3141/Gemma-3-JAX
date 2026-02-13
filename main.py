@@ -102,6 +102,6 @@ if __name__ == "__main__":
     init_dist()
     configure_wandb_api_key_for_worker()
 
-    from entrypoints.gemma_forward_inference import main
+    from entrypoints.rl import main
 
     main()

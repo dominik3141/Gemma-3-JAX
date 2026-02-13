@@ -17,8 +17,8 @@ Plan:
 MAX_ROOT = 900
 MIN_ROOT = 1
 SAMPLE_TEMP = 1  # as suggested by R1 paper
-GROUP_SIZE = 8  # as suggested by R1 paper
-MAX_RESPONSE_LENGTH = 250
+GROUP_SIZE = 4  # as suggested by R1 paper
+MAX_RESPONSE_LENGTH = 500
 EPSILON = 0.1
 BETA = 0.001  # as suggested by R1 paper
 NUM_GROUPS_PER_UPDATE = 32  # as suggested by R1 paper
