@@ -1,11 +1,7 @@
 import logging
-import os
-import subprocess
-import time
 
 import jax
 import jax.experimental.multihost_utils as multihost_utils
-import numpy as np
 import optax
 
 import utils.wandb_logging as wandb_logging
@@ -27,73 +23,10 @@ REFERENCE_PARAMS_UPDATE_INTERVAL = 400  # as suggested by the R1 paper
 CHECKPOINT_INTERVAL = 25
 ENABLE_PROFILER = False
 PROFILE_STOP_STEP = 5
-PROFILE_GCS_BUCKET = "gs://gemma-3-training-profiles-20260207-165411-1d9c5e-euw4"
-# Default behavior keeps one profile artifact set per run.
-# Set to True if you want profile uploads from every host.
-UPLOAD_ALL_HOST_PROFILES = False
+PROFILE_LOGDIR = "gs://gemma-3-training-profiles-20260207-165411-1d9c5e-euw4"
+PROFILE_START_BARRIER_NAME = "gemma_rl_profile_start"
+PROFILE_STOP_BARRIER_NAME = "gemma_rl_profile_stop"
 LOGGER = logging.getLogger(__name__)
-
-
-def _profile_run_id() -> str:
-    local_run_id = np.int64(time.time())
-    shared_run_id = multihost_utils.broadcast_one_to_all(local_run_id)
-    return str(int(np.asarray(shared_run_id).item()))
-
-
-def _log_completed_process_output(result: subprocess.CompletedProcess[str]) -> None:
-    for line in result.stdout.splitlines():
-        if line.strip():
-            LOGGER.info("[gsutil stdout] %s", line)
-    for line in result.stderr.splitlines():
-        if line.strip():
-            LOGGER.warning("[gsutil stderr] %s", line)
-
-
-def _maybe_upload_profile_artifacts(profile_run_id: str) -> None:
-    try:
-        process_index = jax.process_index()
-        if UPLOAD_ALL_HOST_PROFILES:
-            destination = f"{PROFILE_GCS_BUCKET}/{profile_run_id}/host_{process_index}/"
-        elif process_index == 0:
-            destination = f"{PROFILE_GCS_BUCKET}/{profile_run_id}/"
-        else:
-            LOGGER.info(
-                "Skipping profile upload on host_%s; host_0 uploads for this run.",
-                process_index,
-            )
-            destination = None
-
-        if destination is not None and os.path.isdir("artifacts"):
-            LOGGER.info("Uploading artifacts to %s...", destination)
-            result = subprocess.run(
-                [
-                    "gsutil",
-                    "-m",
-                    "cp",
-                    "-c",
-                    "-r",
-                    "artifacts",
-                    destination,
-                ],
-                check=False,
-                capture_output=True,
-                text=True,
-            )
-            _log_completed_process_output(result)
-            if result.returncode == 0:
-                LOGGER.info("Upload complete.")
-            else:
-                LOGGER.warning(
-                    "Profile upload finished with non-zero exit code (%s); continuing training.",
-                    result.returncode,
-                )
-        elif destination is not None:
-            LOGGER.info("No local artifacts directory found; skipping profile upload.")
-    except Exception as exc:
-        LOGGER.warning(
-            "Failed to upload artifacts (best effort, continuing training): %s",
-            exc,
-        )
 
 
 def main() -> None:
@@ -119,30 +52,54 @@ def main() -> None:
             "beta": BETA,
             "num_groups_per_update": NUM_GROUPS_PER_UPDATE,
             "learning_rate": LEARNING_RATE,
+            "enable_profiler": ENABLE_PROFILER,
+            "profile_logdir": PROFILE_LOGDIR,
+            "profile_stop_step": PROFILE_STOP_STEP,
         },
     )
 
-    profile_run_id = _profile_run_id() if ENABLE_PROFILER else None
+    profiler_started = False
 
     try:
         if ENABLE_PROFILER:
-            assert profile_run_id is not None
-            LOGGER.info("Starting JAX profiler trace...")
-            LOGGER.info("Profile run id: %s", profile_run_id)
-            jax.profiler.start_trace("artifacts/profile")
+            try:
+                LOGGER.info(
+                    "Synchronizing hosts before profiler start (%s)...",
+                    PROFILE_START_BARRIER_NAME,
+                )
+                multihost_utils.sync_global_devices(PROFILE_START_BARRIER_NAME)
+                LOGGER.info("Starting JAX profiler trace to %s...", PROFILE_LOGDIR)
+                jax.profiler.start_trace(PROFILE_LOGDIR)
+                profiler_started = True
+            except Exception as exc:
+                LOGGER.warning("Failed to start JAX profiler trace: %s", exc)
 
         while True:
             wandb_logging.set_step(i)
 
             if ENABLE_PROFILER and i == PROFILE_STOP_STEP:
                 try:
-                    jax.profiler.stop_trace()
-                    LOGGER.info("Stopped JAX profiler trace.")
+                    LOGGER.info(
+                        "Synchronizing hosts before profiler stop (%s)...",
+                        PROFILE_STOP_BARRIER_NAME,
+                    )
+                    multihost_utils.sync_global_devices(PROFILE_STOP_BARRIER_NAME)
+                except Exception as exc:
+                    LOGGER.warning(
+                        "Failed to synchronize hosts before stopping profiler: %s",
+                        exc,
+                    )
+
+                try:
+                    if profiler_started:
+                        jax.profiler.stop_trace()
+                        LOGGER.info("Stopped JAX profiler trace.")
+                    else:
+                        LOGGER.warning(
+                            "Skipping profiler stop because this host never started tracing."
+                        )
                 except Exception as exc:
                     LOGGER.warning("Failed to stop JAX profiler trace: %s", exc)
-
-                assert profile_run_id is not None
-                _maybe_upload_profile_artifacts(profile_run_id)
 
             params, loss, format_pct, correct_pct, optimizer_state = train_loop(
                 key, params, params_ref, optimizer_state

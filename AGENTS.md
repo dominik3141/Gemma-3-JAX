@@ -35,6 +35,11 @@
 - Do not use fine-grained object ACLs unless explicitly requested for a specific bucket.
 - When creating buckets via `gcloud storage buckets create`, include `--uniform-bucket-level-access`.
 
+## Profiling logdir preference (do not skip)
+- Prefer direct JAX profiler writes to GCS (`jax.profiler.start_trace("gs://...")`) instead of local trace staging + manual `gsutil cp`.
+- Keep inference and RL traces under the same profiling logdir root so XProf/TensorBoard can discover sessions without custom stitching logic.
+- When changing profiling layout conventions, clear old profile objects first to avoid mixed directory structures in the same bucket.
+
 ## Default region (do not skip)
 - Default GCP region for new resources is `europe-west4`.
 - Default TPU zone is `europe-west4-b` unless explicitly overridden.

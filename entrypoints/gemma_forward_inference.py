@@ -1,8 +1,6 @@
 """Inference script entrypoint for batched cached forward generation."""
 
 import logging
-import os
-import subprocess
 import time
 
 import jax
@@ -17,83 +15,14 @@ from utils.tokenize_text import detokenize_ids, tokenize_text
 import utils.wandb_logging as wandb_logging
 
 ENABLE_PROFILER = True
-PROFILE_GCS_BUCKET = "gs://gemma-3-training-profiles-20260207-165411-1d9c5e-euw4"
-PROFILE_TRACE_DIR = "artifacts/profile"
-# Default behavior keeps one profile artifact set per run.
-# Set to True if you want profile uploads from every host.
-UPLOAD_ALL_HOST_PROFILES = True
+PROFILE_LOGDIR = "gs://gemma-3-training-profiles-20260207-165411-1d9c5e-euw4"
+PROFILE_START_BARRIER_NAME = "gemma_inference_profile_start"
+PROFILE_STOP_BARRIER_NAME = "gemma_inference_profile_stop"
 LOGGER = logging.getLogger(__name__)
-
-
-def _profile_run_id() -> str:
-    local_run_id = np.int64(time.time())
-    shared_run_id = multihost_utils.broadcast_one_to_all(local_run_id)
-    return str(int(np.asarray(shared_run_id).item()))
-
-
-def _log_completed_process_output(result: subprocess.CompletedProcess[str]) -> None:
-    for line in result.stdout.splitlines():
-        if line.strip():
-            LOGGER.info("[gsutil stdout] %s", line)
-    for line in result.stderr.splitlines():
-        if line.strip():
-            LOGGER.warning("[gsutil stderr] %s", line)
-
-
-def _maybe_upload_profile_artifacts(profile_run_id: str) -> None:
-    try:
-        process_index = jax.process_index()
-        if UPLOAD_ALL_HOST_PROFILES:
-            destination = (
-                f"{PROFILE_GCS_BUCKET}/inference/{profile_run_id}/host_{process_index}/"
-            )
-        elif process_index == 0:
-            destination = f"{PROFILE_GCS_BUCKET}/inference/{profile_run_id}/"
-        else:
-            LOGGER.info(
-                "Skipping profile upload on host_%s; host_0 uploads for this run.",
-                process_index,
-            )
-            destination = None
-
-        if destination is not None and os.path.isdir(PROFILE_TRACE_DIR):
-            LOGGER.info("Uploading profiler artifacts to %s...", destination)
-            result = subprocess.run(
-                [
-                    "gsutil",
-                    "-m",
-                    "cp",
-                    "-c",
-                    "-r",
-                    PROFILE_TRACE_DIR,
-                    destination,
-                ],
-                check=False,
-                capture_output=True,
-                text=True,
-            )
-            _log_completed_process_output(result)
-            if result.returncode == 0:
-                LOGGER.info("Profiler upload complete.")
-            else:
-                LOGGER.warning(
-                    "Profiler upload finished with non-zero exit code (%s).",
-                    result.returncode,
-                )
-        elif destination is not None:
-            LOGGER.info(
-                "No profiler artifacts found at %s; skipping upload.", PROFILE_TRACE_DIR
-            )
-    except Exception as exc:
-        LOGGER.warning(
-            "Failed to upload profiler artifacts (best effort, continuing): %s",
-            exc,
-        )
 
 
 def main() -> None:
     max_new_tokens = 400
-    profile_run_id = _profile_run_id() if ENABLE_PROFILER else None
     profiler_started = False
 
     wandb_logging.init_wandb(
@@ -101,16 +30,19 @@ def main() -> None:
         config={
             "max_new_tokens": max_new_tokens,
             "enable_profiler": ENABLE_PROFILER,
-            "profile_trace_dir": PROFILE_TRACE_DIR,
+            "profile_logdir": PROFILE_LOGDIR,
         },
     )
     try:
         if ENABLE_PROFILER:
-            assert profile_run_id is not None
-            LOGGER.info("Starting JAX profiler trace...")
-            LOGGER.info("Profile run id: %s", profile_run_id)
             try:
-                jax.profiler.start_trace(PROFILE_TRACE_DIR)
+                LOGGER.info(
+                    "Synchronizing hosts before profiler start (%s)...",
+                    PROFILE_START_BARRIER_NAME,
+                )
+                multihost_utils.sync_global_devices(PROFILE_START_BARRIER_NAME)
+                LOGGER.info("Starting JAX profiler trace to %s...", PROFILE_LOGDIR)
+                jax.profiler.start_trace(PROFILE_LOGDIR)
                 profiler_started = True
             except Exception as exc:
                 LOGGER.warning("Failed to start JAX profiler trace: %s", exc)
@@ -282,15 +214,25 @@ def main() -> None:
         )
     finally:
         try:
+            if ENABLE_PROFILER:
+                try:
+                    LOGGER.info(
+                        "Synchronizing hosts before profiler stop (%s)...",
+                        PROFILE_STOP_BARRIER_NAME,
+                    )
+                    multihost_utils.sync_global_devices(PROFILE_STOP_BARRIER_NAME)
+                except Exception as exc:
+                    LOGGER.warning(
+                        "Failed to synchronize hosts before stopping profiler: %s",
+                        exc,
+                    )
+
             if profiler_started:
                 try:
                     jax.profiler.stop_trace()
                     LOGGER.info("Stopped JAX profiler trace.")
                 except Exception as exc:
                     LOGGER.warning("Failed to stop JAX profiler trace: %s", exc)
-
-                if profile_run_id is not None:
-                    _maybe_upload_profile_artifacts(profile_run_id)
         finally:
             wandb_logging.finish_wandb()
 
