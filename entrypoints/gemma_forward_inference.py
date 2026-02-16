@@ -144,9 +144,7 @@ def main() -> None:
             # the whole loop and alias carry buffers across steps.
             return jax.vmap(
                 forward_single_impl, in_axes=(0, None, 0, 1, 1), out_axes=(0, 1, 1)
-            )(
-                token_ids, params, pos, Ks_cached, Vs_cached
-            )
+            )(token_ids, params, pos, Ks_cached, Vs_cached)
 
         def scan_body(params, carry, _):
             logits, curr_pos, Ks, Vs = carry
