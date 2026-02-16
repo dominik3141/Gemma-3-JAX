@@ -18,14 +18,14 @@ But for now we just always take sequences of the same length to avoid this probl
 
 import jax
 import jax.numpy as jnp
+from jaxtyping import Array, Float, Int, PRNGKeyArray
 from core.gemma_forward import forward
 import optax
 from core.gemma_forward import Params
 from utils.sft_data import get_training_sample
 from functools import partial
 
-
-def loss_fn(xs, params) -> jax.Array:
+def loss_fn(xs: Int[Array, "seq"], params: Params) -> Float[Array, ""]:
     predictions = forward(xs, params)
     input_len = xs.shape[0]
     predictions = predictions[: input_len - 1]  # remove padding
@@ -34,14 +34,21 @@ def loss_fn(xs, params) -> jax.Array:
     return jnp.mean(loss)
 
 
-def SGD(params, grads, lr) -> Params:
+def SGD(params: Params, grads: Params, lr: float) -> Params:
     return jax.tree_util.tree_map(lambda param, grad: param - lr * grad, params, grads)
 
 
 def train(
-    key, batch_size, params, seq_length, lr, data_sharding
-) -> tuple[Params, jax.Array]:
-    def loss_batched(xss, params) -> jax.Array:
+    key: PRNGKeyArray,
+    batch_size: int,
+    params: Params,
+    seq_length: int,
+    lr: float,
+    data_sharding,
+) -> tuple[Params, Float[Array, ""]]:
+    def loss_batched(
+        xss: Int[Array, "batch seq"], params: Params
+    ) -> Float[Array, ""]:
         return jnp.mean(jax.vmap(loss_fn, in_axes=(0, None))(xss, params))
 
     keys = jax.random.split(key, batch_size)
@@ -53,7 +60,9 @@ def train(
     return SGD(params, grads, lr), loss
 
 
-def train_loop(data_sharding, batch_size, params, key) -> tuple[Params, jax.Array]:
+def train_loop(
+    data_sharding, batch_size: int, params: Params, key: PRNGKeyArray
+) -> tuple[Params, Float[Array, ""]]:
     new_params, loss = train(key, batch_size, params, 1024, 0.01, data_sharding)
 
     return new_params, loss

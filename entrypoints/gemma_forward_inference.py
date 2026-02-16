@@ -8,6 +8,7 @@ import jax
 import jax.experimental.multihost_utils as multihost_utils
 import jax.numpy as jnp
 import numpy as np
+from jaxtyping import Array, Float, Int
 
 from core.gemma_forward import config
 from core.gemma_forward_inference import forward_single_impl
@@ -29,25 +30,30 @@ class PromptBatch:
     prompts: list[str]
     prompt_tokens_batch: list[list[int]]
     prompt_lengths: list[int]
-    prompt_lengths_array: jax.Array
-    tokens_padded: jax.Array
-    last_prompt_tokens: jax.Array
+    prompt_lengths_array: Int[Array, "batch"]
+    tokens_padded: Int[Array, "batch prompt_len"]
+    last_prompt_tokens: Int[Array, "batch"]
     batch_size: int
     max_prompt_tokens: int
 
 
 @dataclass(frozen=True)
 class PrefillResult:
-    logits: jax.Array
-    ks_cached: jax.Array
-    vs_cached: jax.Array
+    logits: Float[Array, "batch vocab"]
+    ks_cached: Float[Array, "layer batch cache_pos kv_head head_dim"]
+    vs_cached: Float[Array, "layer batch cache_pos kv_head value_dim"]
     prefill_elapsed: float
 
 
 @dataclass(frozen=True)
 class DecodeResult:
-    final_carry: tuple[jax.Array, jax.Array, jax.Array, jax.Array]
-    generated_tokens_array: jax.Array
+    final_carry: tuple[
+        Float[Array, "batch vocab"],
+        Int[Array, "batch"],
+        Float[Array, "layer batch cache_pos kv_head head_dim"],
+        Float[Array, "layer batch cache_pos kv_head value_dim"],
+    ]
+    generated_tokens_array: Int[Array, "decode_len batch"]
     compile_elapsed: float
     generation_elapsed: float
 
@@ -101,7 +107,17 @@ def build_prompt_batch(prompts: list[str]) -> PromptBatch:
     )
 
 
-def forward_single_batch(token_ids, params, pos, ks_cached, vs_cached):
+def forward_single_batch(
+    token_ids: Int[Array, "batch"],
+    params,
+    pos: Int[Array, "batch"],
+    ks_cached: Float[Array, "layer batch cache_pos kv_head head_dim"],
+    vs_cached: Float[Array, "layer batch cache_pos kv_head value_dim"],
+) -> tuple[
+    Float[Array, "batch vocab"],
+    Float[Array, "layer batch cache_pos kv_head head_dim"],
+    Float[Array, "layer batch cache_pos kv_head value_dim"],
+]:
     # Keep carry as [layers, batch, ...] to match decode scan layout.
     return jax.vmap(
         forward_single_impl, in_axes=(0, None, 0, 1, 1), out_axes=(0, 1, 1)
@@ -110,12 +126,16 @@ def forward_single_batch(token_ids, params, pos, ks_cached, vs_cached):
 
 def run_prefill(
     params,
-    prompt_tokens,
-    prompt_lengths,
-    prompt_last_tokens,
-    init_ks_cached,
-    init_vs_cached,
-):
+    prompt_tokens: Int[Array, "batch prompt_len"],
+    prompt_lengths: Int[Array, "batch"],
+    prompt_last_tokens: Int[Array, "batch"],
+    init_ks_cached: Float[Array, "layer batch cache_pos kv_head head_dim"],
+    init_vs_cached: Float[Array, "layer batch cache_pos kv_head value_dim"],
+) -> tuple[
+    Float[Array, "batch vocab"],
+    Float[Array, "layer batch cache_pos kv_head head_dim"],
+    Float[Array, "layer batch cache_pos kv_head value_dim"],
+]:
     pos0 = jnp.zeros((prompt_tokens.shape[0],), dtype=jnp.int32)
     logits, ks_cached, vs_cached = forward_single_batch(
         prompt_tokens[:, 0],
@@ -146,7 +166,12 @@ def run_prefill(
     return logits, ks_cached, vs_cached
 
 
-def allocate_kv_cache(batch_size: int, kv_cache_len: int) -> tuple[jax.Array, jax.Array]:
+def allocate_kv_cache(
+    batch_size: int, kv_cache_len: int
+) -> tuple[
+    Float[Array, "layer batch cache_pos kv_head head_dim"],
+    Float[Array, "layer batch cache_pos kv_head value_dim"],
+]:
     ks_cached = jnp.zeros(
         (
             config.num_layers,
@@ -194,7 +219,24 @@ def prefill(
     return PrefillResult(logits, ks_cached, vs_cached, prefill_elapsed)
 
 
-def scan_body(params, carry, _):
+def scan_body(
+    params,
+    carry: tuple[
+        Float[Array, "batch vocab"],
+        Int[Array, "batch"],
+        Float[Array, "layer batch cache_pos kv_head head_dim"],
+        Float[Array, "layer batch cache_pos kv_head value_dim"],
+    ],
+    _,
+) -> tuple[
+    tuple[
+        Float[Array, "batch vocab"],
+        Int[Array, "batch"],
+        Float[Array, "layer batch cache_pos kv_head head_dim"],
+        Float[Array, "layer batch cache_pos kv_head value_dim"],
+    ],
+    Int[Array, "batch"],
+]:
     logits, curr_pos, ks_cached, vs_cached = carry
     next_tokens = jnp.argmax(logits, axis=-1).astype(jnp.int32)
     new_logits, new_ks, new_vs = forward_single_batch(
@@ -204,7 +246,23 @@ def scan_body(params, carry, _):
 
 
 def make_run_scan(max_new_tokens: int):
-    def run_scan(params, init_carry):
+    def run_scan(
+        params,
+        init_carry: tuple[
+            Float[Array, "batch vocab"],
+            Int[Array, "batch"],
+            Float[Array, "layer batch cache_pos kv_head head_dim"],
+            Float[Array, "layer batch cache_pos kv_head value_dim"],
+        ],
+    ) -> tuple[
+        tuple[
+            Float[Array, "batch vocab"],
+            Int[Array, "batch"],
+            Float[Array, "layer batch cache_pos kv_head head_dim"],
+            Float[Array, "layer batch cache_pos kv_head value_dim"],
+        ],
+        Int[Array, "decode_len batch"],
+    ]:
         return jax.lax.scan(
             lambda carry, xs: scan_body(params, carry, xs),
             init_carry,
@@ -215,7 +273,16 @@ def make_run_scan(max_new_tokens: int):
     return run_scan
 
 
-def decode(params, init_carry, max_new_tokens: int) -> DecodeResult:
+def decode(
+    params,
+    init_carry: tuple[
+        Float[Array, "batch vocab"],
+        Int[Array, "batch"],
+        Float[Array, "layer batch cache_pos kv_head head_dim"],
+        Float[Array, "layer batch cache_pos kv_head value_dim"],
+    ],
+    max_new_tokens: int,
+) -> DecodeResult:
     run_scan = make_run_scan(max_new_tokens)
 
     compile_start = time.perf_counter()

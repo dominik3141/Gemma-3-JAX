@@ -3,7 +3,8 @@ import argparse
 import jax
 import jax.numpy as jnp
 import sentencepiece as spm
-from core.gemma_forward import forward
+from jaxtyping import Array, Float, PRNGKeyArray
+from core.gemma_forward import Params, forward
 from utils.params_io import DEFAULT_ORBAX_CHECKPOINT, load_params
 
 # Load tokenizer
@@ -13,7 +14,6 @@ EOS_ID = 1
 END_OF_TURN_ID = 106  # tokenizer.piece_to_id("<end_of_turn>")
 STOP_IDS_DEFAULT = (EOS_ID, END_OF_TURN_ID)
 
-
 def load_tokenizer(model_path: str) -> spm.SentencePieceProcessor:
     sp = spm.SentencePieceProcessor()
     sp.Load(model_path)
@@ -21,8 +21,8 @@ def load_tokenizer(model_path: str) -> spm.SentencePieceProcessor:
 
 
 def sample_next_token(
-    logits: jax.Array, rng: jax.random.PRNGKey, temperature: float
-) -> tuple[int, jax.random.PRNGKey]:
+    logits: Float[Array, "vocab"], rng: PRNGKeyArray, temperature: float
+) -> tuple[int, PRNGKeyArray]:
     logits = logits.astype(jnp.float32)
     if temperature <= 0:
         return int(jnp.argmax(logits)), rng
@@ -54,7 +54,7 @@ def strip_trailing_stop(token_ids: list[int], stop_ids: set[int]) -> list[int]:
 def generate(
     prompt: str,
     *,
-    params: dict[str, jax.Array],
+    params: Params,
     tokenizer: spm.SentencePieceProcessor,
     max_new_tokens: int = 32,
     temperature: float = 0.8,

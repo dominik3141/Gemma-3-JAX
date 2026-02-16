@@ -2,23 +2,29 @@ r"""
 All comments that include concrete dimensionality numbers are written with the 1B version of Gemma in mind.
 """
 
-import jax.numpy as jnp
-import jax
 from functools import partial
+
+import jax
+import jax.numpy as jnp
+from jaxtyping import Array, Bool, Float, Int
+
 from config.model import gemma_3_27b as config
 
+Params = dict[str, Float[Array, "..."]]
 
-Params = dict[str, jax.Array]
 
-
-def RMSNorm(x: jax.Array, gamma: jax.Array) -> jax.Array:
+def RMSNorm(
+    x: Float[Array, "dim"], gamma: Float[Array, "dim"]
+) -> Float[Array, "dim"]:
     # the weights for this norm are simply named '*layernorm*'
     # x and gamma should have the same shape
     epsilon = 1e-6
     return x / (jnp.sqrt(jnp.mean(jnp.square(x)) + epsilon)) * (1 + gamma)
 
 
-def RoPE(x: jax.Array, position: int, theta: float) -> jax.Array:
+def RoPE(
+    x: Float[Array, "head_dim"], position: int | Int[Array, ""], theta: float
+) -> Float[Array, "head_dim"]:
     d = x.shape[-1]
     if d % 2 != 0:
         raise ValueError(f"RoPE requires even head_dim, got {d}")
@@ -46,11 +52,11 @@ def RoPE(x: jax.Array, position: int, theta: float) -> jax.Array:
 
 
 def mlp(
-    x_0: jax.Array,
-    down_proj_weight: jax.Array,
-    gate_proj_weight: jax.Array,
-    up_proj_weight: jax.Array,
-) -> jax.Array:
+    x_0: Float[Array, "d_model"],
+    down_proj_weight: Float[Array, "d_model d_mlp"],
+    gate_proj_weight: Float[Array, "d_mlp d_model"],
+    up_proj_weight: Float[Array, "d_mlp d_model"],
+) -> Float[Array, "d_model"]:
     x_a = jax.nn.gelu(gate_proj_weight @ x_0, approximate=True)
     x_b = up_proj_weight @ x_0
     x = x_a * x_b  # elementwise multiplication
@@ -60,8 +66,15 @@ def mlp(
 
 
 def calc_qkv(
-    x: jax.Array, block_params: Params, pos: jax.Array, is_local_attn: jax.Array
-) -> tuple[jax.Array, jax.Array, jax.Array]:
+    x: Float[Array, "d_model"],
+    block_params: Params,
+    pos: int | Int[Array, ""],
+    is_local_attn: bool | Bool[Array, ""],
+) -> tuple[
+    Float[Array, "kv_head head_dim"],
+    Float[Array, "kv_head value_dim"],
+    Float[Array, "kv_head q_per_group head_dim"],
+]:
     # Prepare for attention
     theta = jnp.where(is_local_attn, 10_000.0, 1_000_000.0)
 
@@ -92,7 +105,11 @@ def calc_qkv(
     return Ks, Vs, Qss
 
 
-def postAttn(x: jax.Array, x_og: jax.Array, block_params: Params) -> jax.Array:
+def postAttn(
+    x: Float[Array, "attn_dim"],
+    x_og: Float[Array, "d_model"],
+    block_params: Params,
+) -> Float[Array, "d_model"]:
     # map attention output back to d_model
     x = block_params["self_attn.o_proj.weight"] @ x
 
@@ -116,8 +133,12 @@ def postAttn(x: jax.Array, x_og: jax.Array, block_params: Params) -> jax.Array:
 
 
 def AttnScores(
-    Q_a: jax.Array, Ks: jax.Array, idx_a: jax.Array, seq_indices, local_attn: bool
-) -> jax.Array:
+    Q_a: Float[Array, "head_dim"],
+    Ks: Float[Array, "seq head_dim"],
+    idx_a: int | Int[Array, ""],
+    seq_indices: Int[Array, "seq"],
+    local_attn: bool,
+) -> Float[Array, "seq"]:
     """
     Calculates masked attention scores.
     """
@@ -136,14 +157,27 @@ def AttnScores(
     return jax.nn.softmax(scores.astype(jnp.float32)).astype(scores.dtype)
 
 
-def attnHead(Ks, Vs, Qs, pos_a, is_local_attn) -> jax.Array:
+def attnHead(
+    Ks: Float[Array, "seq head_dim"],
+    Vs: Float[Array, "seq value_dim"],
+    Qs: Float[Array, "seq head_dim"],
+    pos_a: Int[Array, "seq"],
+    is_local_attn: bool | Bool[Array, ""],
+) -> Float[Array, "seq value_dim"]:
     r"""
     We define
     Z_a := \sum_b Attn(a,b) * V_b,
     where Attn(a,b) := softmax((Q_a K_b^T)/sqrt(d_k))
     """
 
-    def Attn(is_local_attn: bool, Ks, Vs, Qs, pos_a, seq_indices) -> jax.Array:
+    def Attn(
+        is_local_attn: bool,
+        Ks: Float[Array, "seq head_dim"],
+        Vs: Float[Array, "seq value_dim"],
+        Qs: Float[Array, "seq head_dim"],
+        pos_a: Int[Array, "seq"],
+        seq_indices: Int[Array, "seq"],
+    ) -> Float[Array, "seq value_dim"]:
         return jax.vmap(
             lambda Ks, Vs, Q_a, idx_a, seq_indices: AttnScores(
                 Q_a, Ks, idx_a, seq_indices, is_local_attn
@@ -164,8 +198,14 @@ def attnHead(Ks, Vs, Qs, pos_a, is_local_attn) -> jax.Array:
 
 
 def group_attention(
-    xs, Ks, Vs, Qss, sequence_len: int, is_local_attn, pos
-) -> jax.Array:
+    xs: Float[Array, "seq d_model"],
+    Ks: Float[Array, "seq head_dim"],
+    Vs: Float[Array, "seq value_dim"],
+    Qss: Float[Array, "seq q_per_group head_dim"],
+    sequence_len: int,
+    is_local_attn: bool | Bool[Array, ""],
+    pos: Int[Array, "seq"],
+) -> Float[Array, "seq q_group_dim"]:
     """
     In GQA, there might be mutliple queries per group.
     """
@@ -186,7 +226,10 @@ def group_attention(
 
 @jax.jit  # the scan should already compile this, but better to be explicit
 @jax.checkpoint  # OOM problems without this
-def Block(xs: jax.Array, scans) -> jax.Array:
+def Block(
+    xs: Float[Array, "seq d_model"],
+    scans: tuple[Params, bool | Bool[Array, ""]],
+) -> tuple[Float[Array, "seq d_model"], None]:
     r"""
     Plan:
     1.  Input layernorm
@@ -279,7 +322,7 @@ def extract_block_params(params: Params, prefix: str) -> Params:
     return block_params
 
 
-def get_gemma3_layer_types(num_layers: int) -> jax.Array:
+def get_gemma3_layer_types(num_layers: int) -> Bool[Array, "layer"]:
     """
     Generates a boolean mask for Gemma 3 attention layers.
     True = Local sliding window attention
@@ -298,7 +341,7 @@ def get_gemma3_layer_types(num_layers: int) -> jax.Array:
 
 
 @jax.jit
-def forward(xs: jax.Array, params: Params) -> jax.Array:
+def forward(xs: Int[Array, "seq"], params: Params) -> Float[Array, "seq vocab"]:
     r"""
     Input is a sequence of ids, each referencing a specific token in vocab
     i.e. [1233, 12, 83238, ....]

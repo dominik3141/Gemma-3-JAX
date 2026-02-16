@@ -35,6 +35,7 @@ import socket
 import jax
 import jax.numpy as jnp
 import optax
+from jaxtyping import Array, Float, Int, PRNGKeyArray
 from core.gemma_forward import Params, forward
 from core.gemma_forward_inference import forward_single, get_KV
 from utils.gcp import log_text_async
@@ -46,17 +47,16 @@ HOSTNAME = socket.gethostname()
 PID = os.getpid()
 LOGGER = logging.getLogger(__name__)
 
-
 def sample_with_temp(
-    key: jax.random.PRNGKey,
+    key: PRNGKeyArray,
     params: Params,
-    final_prompt_token: jax.Array,
+    final_prompt_token: int | Int[Array, ""],
     pos: int,  # position of the last prompt token <=> length of prompt
-    K_cache: jax.Array,
-    V_cache: jax.Array,
+    K_cache: Float[Array, "layer cache_pos kv_head head_dim"],
+    V_cache: Float[Array, "layer cache_pos kv_head value_dim"],
     temperature: float,
     sample_length: int,
-) -> tuple[jax.Array, jax.Array]:
+) -> tuple[Int[Array, "traj_len"], Float[Array, "traj_len"]]:
     """
     Sample according to a given temperature for a fixed length.
     We return both the autoregressively completed sequence and the probability of the trajectory at
@@ -90,7 +90,7 @@ def sample_with_temp(
     return xs, log_probs
 
 
-def get_prompt(n: int) -> jax.Array:
+def get_prompt(n: int | Int[Array, ""]) -> Int[Array, "prompt_len"]:
     r"""
     Returns the tokens of a prompt to calculate the square root of n,
     wrapped in the DeepSeek-R1-Zero system template.
@@ -153,7 +153,7 @@ User: Calculate the square root of """
 
 
 def _impure_reward_fn(
-    output_tokens: jax.Array, int_to_radicate: int
+    output_tokens: Int[Array, "traj_len"], int_to_radicate: int
 ) -> tuple[float, float, float, int]:
     r"""
     Calculate a reward (both for correctness and for existence of thinking tags)
@@ -277,8 +277,8 @@ def _impure_reward_fn(
 
 
 def reward_fn(
-    output_tokens: jax.Array, int_to_radicate: int
-) -> tuple[jax.Array, jax.Array, jax.Array, jax.Array]:
+    output_tokens: Int[Array, "traj_len"], int_to_radicate: int | Int[Array, ""]
+) -> tuple[Float[Array, ""], Float[Array, ""], Float[Array, ""], Int[Array, ""]]:
     return jax.pure_callback(
         _impure_reward_fn,
         (
@@ -295,12 +295,12 @@ def reward_fn(
 
 def objective_function(
     params: Params,
-    group: jax.Array,
-    int_to_radicate: int,
-    prompt: jax.Array,
-    theta_old_log_probs: jax.Array,
+    group: Int[Array, "group traj_len"],
+    int_to_radicate: int | Int[Array, ""],
+    prompt: Int[Array, "prompt_len"],
+    theta_old_log_probs: Float[Array, "group traj_len"],
     params_ref: Params,
-) -> tuple[jax.Array, tuple[jax.Array, jax.Array]]:
+) -> tuple[Float[Array, ""], tuple[Float[Array, ""], Float[Array, ""]]]:
     r"""
     The GRPO objective function that we can then differentiate with respect to the policy parameters \theta.
 
@@ -381,8 +381,8 @@ def objective_function(
 
 
 def mask_fn(
-    log_probs: jax.Array, answer_end_pos: jax.Array, prompt_len: int
-) -> jax.Array:
+    log_probs: Float[Array, "traj_len"], answer_end_pos: int | Int[Array, ""], prompt_len: int
+) -> Float[Array, "traj_len"]:
     """
     Mask out prompt tokens as well as post answer tokens.
     """
@@ -397,7 +397,7 @@ def mask_fn(
     return masked_log_probs
 
 
-def advantage_fn(rewards: jax.Array) -> jax.Array:
+def advantage_fn(rewards: Float[Array, "group"]) -> Float[Array, "group"]:
     r"""
     Defined as
         A_i = (r_i - mean({r_1, ..., r_G})) / std({r_1, ..., r_G})
@@ -413,8 +413,8 @@ def advantage_fn(rewards: jax.Array) -> jax.Array:
 
 
 def ratio_fn(
-    theta_traj_log_prob: jax.Array, theta_old_traj_log_prob: jax.Array
-) -> jax.Array:
+    theta_traj_log_prob: Float[Array, ""], theta_old_traj_log_prob: Float[Array, ""]
+) -> Float[Array, ""]:
     r"""
     The good old PPO ratio defined as
         \rho_i(\theta) = ( \pi_\theta (o_i | q) ) / ( \pi_{\theta_old} (o_i | q)) ,
@@ -427,7 +427,9 @@ def ratio_fn(
     return jnp.exp(theta_traj_log_prob - theta_old_traj_log_prob)
 
 
-def log_prop_of_trajectory(params: Params, trajectory: jax.Array, prompt: jax.Array):
+def log_prop_of_trajectory(
+    params: Params, trajectory: Int[Array, "traj_len"], prompt: Int[Array, "prompt_len"]
+) -> Float[Array, "traj_len"]:
     r"""
     The probability of a given trajectory o_i is defined as the (conditional) probability
     of every token, so
@@ -459,11 +461,11 @@ def log_prop_of_trajectory(params: Params, trajectory: jax.Array, prompt: jax.Ar
 
 def KL(
     params_ref: Params,
-    group: jax.Array,
-    prompt: jax.Array,
-    theta_log_probs: jax.Array,
-    end_of_answer_pos: jax.Array,
-) -> jax.Array:
+    group: Int[Array, "group traj_len"],
+    prompt: Int[Array, "prompt_len"],
+    theta_log_probs: Float[Array, "group traj_len"],
+    end_of_answer_pos: Int[Array, "group"],
+) -> Float[Array, "group traj_len"]:
     r"""
     Calculates KL(\pi_{ref} || \pi_\theta) per token.
 
@@ -489,8 +491,8 @@ def KL(
 
 
 def get_group(
-    key: jax.random.PRNGKey, group_size: int, params: Params
-) -> tuple[jax.Array, jax.Array, jax.Array, jax.Array]:
+    key: PRNGKeyArray, group_size: int, params: Params
+) -> tuple[Int[Array, "group traj_len"], Float[Array, "group traj_len"], Int[Array, ""], Int[Array, "prompt_len"]]:
     """
     Samples a group of responses.
     """
@@ -526,12 +528,12 @@ def get_group(
 
 
 def train_inner_loop(
-    key: jax.random.PRNGKey, params: Params, params_ref: Params
+    key: PRNGKeyArray, params: Params, params_ref: Params
 ) -> tuple[
-    jax.Array,
-    jax.Array,
-    jax.Array,
-    jax.Array,
+    Float[Array, ""],
+    Float[Array, ""],
+    Float[Array, ""],
+    Params,
 ]:
     # sample a group
     grp, theta_old_log_probs, int_to_radicate, prompt = get_group(
@@ -553,15 +555,15 @@ def train_inner_loop(
 
 @jax.jit
 def train_loop(
-    key: jax.random.PRNGKey,
+    key: PRNGKeyArray,
     params: Params,
     params_ref: Params,
     optimizer_state: optax.OptState,
 ) -> tuple[
     Params,
-    jax.Array,
-    jax.Array,
-    jax.Array,
+    Float[Array, ""],
+    Float[Array, ""],
+    Float[Array, ""],
     optax.OptState,
 ]:
     keys = jax.random.split(key, NUM_GROUPS_PER_UPDATE)

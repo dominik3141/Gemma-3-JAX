@@ -2,6 +2,7 @@ import jax
 import jax.numpy as jnp
 import sentencepiece as spm
 from pathlib import Path
+from jaxtyping import Array, Int, PRNGKeyArray
 
 import numpy as np
 
@@ -10,8 +11,7 @@ _TOKENIZER_PATH = "data/common/tokenizer.model"
 _DATA_PATH = "data/train/shakespeare.txt"
 _TOKENIZED_PATH = "data/gemma-3-1b/shakespeare_tokenized.npz"
 
-
-def _load_data() -> jax.Array:
+def _load_data() -> Int[Array, "corpus_len"]:
     """Loads and tokenizes the Shakespeare dataset, caching to disk."""
     cache_path = Path(_TOKENIZED_PATH)
 
@@ -40,7 +40,7 @@ def _load_data() -> jax.Array:
 _TOKENS = _load_data()
 
 
-def get_training_sample(length: int, key: jax.Array) -> jax.Array:
+def get_training_sample(length: int, key: PRNGKeyArray) -> Int[Array, "seq"]:
     """
     Returns a single sequence of tokenized training data from skaespeare.txt
     """

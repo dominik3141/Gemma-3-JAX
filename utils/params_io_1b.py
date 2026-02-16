@@ -1,12 +1,12 @@
-import jax
 import orbax.checkpoint as ocp
 import os
 import logging
+from jaxtyping import Array, Float
 
 
 LOGGER = logging.getLogger(__name__)
 
-Params = dict[str, jax.Array]
+Params = dict[str, Float[Array, "..."]]
 
 # get parameter only from gcp bucket if not running locally
 if os.environ.get("GEMMA_RUNNING_LOCALLY") == "true":

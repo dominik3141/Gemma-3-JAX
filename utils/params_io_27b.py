@@ -10,6 +10,7 @@ from typing import Iterable, Tuple, Any
 
 import jax
 import numpy as np
+from jaxtyping import Array, Float
 from jax.sharding import NamedSharding, PartitionSpec
 import orbax.checkpoint as ocp
 from jax.experimental import multihost_utils
@@ -167,7 +168,7 @@ def _restore_to_host(
     ckptr: ocp.StandardCheckpointer,
     checkpoint_path: str,
     meta_tree: Any,
-) -> dict[str, jax.Array]:
+) -> dict[str, Float[Array, "..."]]:
     cpu_device = jax.devices("cpu")[0]
     target = _build_target(meta_tree, mesh=None, sharded=False)
     with jax.default_device(cpu_device):
@@ -221,10 +222,10 @@ def _slice_for_host(
 
 
 def _shard_to_mesh(
-    params: dict[str, jax.Array],
+    params: dict[str, Float[Array, "..."]],
     mesh: jax.sharding.Mesh,
-) -> dict[str, jax.Array]:
-    sharded: dict[str, jax.Array] = {}
+) -> dict[str, Float[Array, "..."]]:
+    sharded: dict[str, Float[Array, "..."]] = {}
     is_multihost = jax.process_count() > 1
     host_index = jax.process_index()
     host_count = jax.process_count()
@@ -257,7 +258,9 @@ def load_params(
     mesh_factory=None,
     host_first: bool = True,
     return_mesh: bool = False,
-) -> dict[str, jax.Array] | tuple[dict[str, jax.Array], jax.sharding.Mesh]:
+) -> dict[str, Float[Array, "..."]] | tuple[
+    dict[str, Float[Array, "..."]], jax.sharding.Mesh
+]:
     ckptr = ocp.StandardCheckpointer()
     meta_tree = _unwrap_metadata(ckptr.metadata(checkpoint_path))
 
@@ -289,7 +292,7 @@ def load_params(
 
 
 def save_params(
-    params: dict[str, jax.Array],
+    params: dict[str, Float[Array, "..."]],
 ) -> str:
     checkpoint_id = uuid.uuid4().hex
     checkpoint_path = _join_checkpoint_path(DEFAULT_GCS_SAVE_ROOT, checkpoint_id)

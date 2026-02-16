@@ -18,6 +18,7 @@ dependencies = [
     "google-cloud-logging>=3.13.0",
     "google-cloud-secret-manager>=2.20.0",
     "wandb>=0.17.0",
+    "jaxtyping>=0.3.9",
 ]
 
 [project.optional-dependencies]
@@ -32,7 +33,7 @@ tensorboard = [
 ]
 
 [tool.ruff.lint]
-ignore = ["E402"]
+ignore = ["E402", "F722", "F821", "E731"]
 
 [[tool.uv.index]]
 name = "jax"

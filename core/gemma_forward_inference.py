@@ -20,6 +20,7 @@ TODO:
 
 import jax
 import jax.numpy as jnp
+from jaxtyping import Array, Bool, Float, Int
 from core.gemma_forward import (
     Params,
     RMSNorm,
@@ -32,14 +33,13 @@ from core.gemma_forward import (
     postAttn,
 )
 
-
 def group_attention_single(
-    Ks: jax.Array,
-    Vs: jax.Array,
-    Qss: jax.Array,
-    pos: jax.Array,
-    is_local_attn: jax.Array,
-) -> jax.Array:
+    Ks: Float[Array, "cache_pos head_dim"],
+    Vs: Float[Array, "cache_pos value_dim"],
+    Qss: Float[Array, "q_per_group head_dim"],
+    pos: int | Int[Array, ""],
+    is_local_attn: bool | Bool[Array, ""],
+) -> Float[Array, "q_group_dim"]:
     """
     Group attention for a single token and a single KV head group.
     """
@@ -52,7 +52,21 @@ def group_attention_single(
     return jnp.reshape(xs, (config.num_queries_per_group * config.d_kvq,))
 
 
-def Block_KV_cached(inits, scans) -> jax.Array:
+def Block_KV_cached(
+    inits: tuple[Float[Array, "d_model"], Int[Array, ""]],
+    scans: tuple[
+        Params,
+        bool | Bool[Array, ""],
+        Float[Array, "cache_pos kv_head head_dim"],
+        Float[Array, "cache_pos kv_head value_dim"],
+    ],
+) -> tuple[
+    tuple[Float[Array, "d_model"], Int[Array, ""]],
+    tuple[
+        Float[Array, "cache_pos kv_head head_dim"],
+        Float[Array, "cache_pos kv_head value_dim"],
+    ],
+]:
     """
     Gemma block for a single token. Communication with other tokens via KV cache.
     """
@@ -85,8 +99,16 @@ def Block_KV_cached(inits, scans) -> jax.Array:
 
 
 def forward_single_impl(
-    x: jax.Array, params: Params, pos: int, Ks_cached: jax.Array, Vs_cached: jax.Array
-) -> tuple[jax.Array, jax.Array, jax.Array]:
+    x: int | Int[Array, ""],
+    params: Params,
+    pos: int | Int[Array, ""],
+    Ks_cached: Float[Array, "layer cache_pos kv_head head_dim"],
+    Vs_cached: Float[Array, "layer cache_pos kv_head value_dim"],
+) -> tuple[
+    Float[Array, "vocab"],
+    Float[Array, "layer cache_pos kv_head head_dim"],
+    Float[Array, "layer cache_pos kv_head value_dim"],
+]:
     """
     Predict the next token given only a single token together with the K,V vectors
     of all prior tokens.
@@ -130,14 +152,25 @@ def forward_single_impl(
 
 @jax.jit
 def forward_single(
-    x: jax.Array, params: Params, pos: int, Ks_cached: jax.Array, Vs_cached: jax.Array
-) -> tuple[jax.Array, jax.Array, jax.Array]:
+    x: int | Int[Array, ""],
+    params: Params,
+    pos: int | Int[Array, ""],
+    Ks_cached: Float[Array, "layer cache_pos kv_head head_dim"],
+    Vs_cached: Float[Array, "layer cache_pos kv_head value_dim"],
+) -> tuple[
+    Float[Array, "vocab"],
+    Float[Array, "layer cache_pos kv_head head_dim"],
+    Float[Array, "layer cache_pos kv_head value_dim"],
+]:
     return forward_single_impl(x, params, pos, Ks_cached, Vs_cached)
 
 
 def get_KV(
-    prompt: jax.Array, params: Params, cache_size: int
-) -> tuple[jax.Array, jax.Array]:
+    prompt: Int[Array, "seq"], params: Params, cache_size: int
+) -> tuple[
+    Float[Array, "layer cache_pos kv_head head_dim"],
+    Float[Array, "layer cache_pos kv_head value_dim"],
+]:
     """
     Given a tokenized prompt, return the prefilled KV cache.
     """
