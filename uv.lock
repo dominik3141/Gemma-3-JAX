@@ -922,8 +922,6 @@ dependencies = [
     { name = "python-dotenv" },
     { name = "rich" },
     { name = "sentencepiece" },
-    { name = "tensorboard" },
-    { name = "tensorboard-plugin-profile" },
     { name = "tensorstore" },
     { name = "wandb" },
 ]
@@ -934,6 +932,12 @@ cuda = [
 ]
 mps = [
     { name = "jax-mps" },
+]
+tensorboard = [
+    { name = "setuptools" },
+    { name = "tensorboard" },
+    { name = "tensorboard-plugin-profile" },
+    { name = "xprof" },
 ]
 tpu = [
     { name = "jax", extra = ["tpu"] },
@@ -961,13 +965,15 @@ requires-dist = [
     { name = "python-dotenv", specifier = ">=1.0.0" },
     { name = "rich", specifier = ">=14.2.0" },
     { name = "sentencepiece", specifier = ">=0.2.1" },
-    { name = "tensorboard", specifier = ">=2.18.0" },
-    { name = "tensorboard-plugin-profile", specifier = ">=2.21.3" },
+    { name = "setuptools", marker = "extra == 'tensorboard'", specifier = "<81" },
+    { name = "tensorboard", marker = "extra == 'tensorboard'", specifier = "==2.20.0" },
+    { name = "tensorboard-plugin-profile", marker = "extra == 'tensorboard'", specifier = "==2.21.5" },
     { name = "tensorstore", specifier = ">=0.1.56" },
     { name = "tpu-info", marker = "extra == 'tpu'" },
     { name = "wandb", specifier = ">=0.17.0" },
+    { name = "xprof", marker = "extra == 'tensorboard'", specifier = "==2.21.5" },
 ]
-provides-extras = ["cuda", "tpu", "mps"]
+provides-extras = ["cuda", "tpu", "mps", "tensorboard"]
 
 [package.metadata.requires-dev]
 dev = [{ name = "pre-commit", specifier = ">=4.5.1" }]
@@ -2059,11 +2065,11 @@ wheels = [
 
 [[package]]
 name = "setuptools"
-version = "82.0.0"
+version = "80.10.2"
 source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/82/f3/748f4d6f65d1756b9ae577f329c951cda23fb900e4de9f70900ced962085/setuptools-82.0.0.tar.gz", hash = "sha256:22e0a2d69474c6ae4feb01951cb69d515ed23728cf96d05513d36e42b62b37cb", size = 1144893, upload-time = "2026-02-08T15:08:40.206Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/76/95/faf61eb8363f26aa7e1d762267a8d602a1b26d4f3a1e758e92cb3cb8b054/setuptools-80.10.2.tar.gz", hash = "sha256:8b0e9d10c784bf7d262c4e5ec5d4ec94127ce206e8738f29a437945fbc219b70", size = 1200343, upload-time = "2026-01-25T22:38:17.252Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/e1/c6/76dc613121b793286a3f91621d7b75a2b493e0390ddca50f11993eadf192/setuptools-82.0.0-py3-none-any.whl", hash = "sha256:70b18734b607bd1da571d097d236cfcfacaf01de45717d59e6e04b96877532e0", size = 1003468, upload-time = "2026-02-08T15:08:38.723Z" },
+    { url = "https://files.pythonhosted.org/packages/94/b8/f1f62a5e3c0ad2ff1d189590bfa4c46b4f3b6e49cef6f26c6ee4e575394d/setuptools-80.10.2-py3-none-any.whl", hash = "sha256:95b30ddfb717250edb492926c92b5221f7ef3fbcc2b07579bcd4a27da21d0173", size = 1064234, upload-time = "2026-01-25T22:38:15.216Z" },
 ]
 
 [[package]]
@@ -2138,13 +2144,13 @@ wheels = [
 
 [[package]]
 name = "tensorboard-plugin-profile"
-version = "2.21.6"
+version = "2.21.5"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "xprof" },
 ]
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/85/38/acf81cd993bf93a689fbce8d03186faddd54454ca368502ecc753defe0b2/tensorboard_plugin_profile-2.21.6-cp313-none-any.whl", hash = "sha256:de764cb8a7d3a8c91bed3c6fed30413528a710ff3c3a795783136cc7775c6d11", size = 5789, upload-time = "2026-02-09T09:54:43.933Z" },
+    { url = "https://files.pythonhosted.org/packages/c4/ad/96ca6a7a8ef8e77b74b5b8796772ea3ca7b7605e098e3b7fb888d51518bf/tensorboard_plugin_profile-2.21.5-cp313-none-any.whl", hash = "sha256:694b8981a395af69e97d2d36f1b1cc1a2d665780ba792dfd2f1e829cf50bbec4", size = 5787, upload-time = "2026-01-28T10:05:05.245Z" },
 ]
 
 [[package]]
@@ -2274,7 +2280,7 @@ wheels = [
 
 [[package]]
 name = "xprof"
-version = "2.21.6"
+version = "2.21.5"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "cheroot" },
@@ -2288,8 +2294,8 @@ dependencies = [
     { name = "werkzeug" },
 ]
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/65/7b/21e7852f0783339df7842a3181bfe8ef317608a19a5c6daf6a75e12815c8/xprof-2.21.6-cp313-none-any.whl", hash = "sha256:068697deda0b30ba41e75553197905bcc43d2e81850c2db21fe9b011d908d600", size = 19204342, upload-time = "2026-02-09T10:16:16.728Z" },
-    { url = "https://files.pythonhosted.org/packages/14/ef/1ba951d52d1e48dc80e4c49ad70082c721cdc3400d69741268fe3163943c/xprof-2.21.6-cp313-none-manylinux_2_27_x86_64.whl", hash = "sha256:f24526cd39206941fcb1fd0e70414a7e31be227706921291e419f75d2019aa27", size = 22732086, upload-time = "2026-02-09T09:54:41.192Z" },
+    { url = "https://files.pythonhosted.org/packages/b7/d3/5c98dc30d819a01d326df643389f636124390f349ce45fb4145038247b39/xprof-2.21.5-cp313-none-any.whl", hash = "sha256:e1b6260a8a7bc34094aaa9fe7cd519500ea7e55853cc785caf8366e4fed66b01", size = 20188164, upload-time = "2026-01-28T10:10:40.725Z" },
+    { url = "https://files.pythonhosted.org/packages/dd/4f/99e4c34cf9e68b7f5c58611e975f3a5d1b4e58ae56d06844f736651f1dd1/xprof-2.21.5-cp313-none-manylinux_2_27_x86_64.whl", hash = "sha256:1dbed1760d534f7f8ef21250dbe0f1c9242f2330cae4435e0ea06eaec01e4ff1", size = 22548426, upload-time = "2026-01-28T10:05:02.874Z" },
 ]
 
 [[package]]

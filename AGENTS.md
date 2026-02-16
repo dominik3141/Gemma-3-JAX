@@ -46,3 +46,13 @@
 
 - Default GCP region for new resources is `europe-west4`.
 - Default TPU zone is `europe-west4-b` unless explicitly overridden.
+
+## Multihost JAX profiling reminder
+
+- For multihost TPU profiling, set one shared `jax.profiler.ProfileOptions().session_id` across hosts (for example by broadcasting a host-0 timestamp).
+- If each host gets a different session id, traces are written to different `plugins/profile/<session_id>` folders and TensorBoard cannot stitch one combined profile.
+
+## TensorBoard VM reminder
+
+- For large TPU profiles, do not run TensorBoard/XProf on the local Mac. Use the GCP VM workflow in `ops/tensorboard_vm_runbook.md`.
+- Preferred VM is `tb-profile-euw4` in `europe-west4-b`; start it when needed and stop it when idle to control cost.

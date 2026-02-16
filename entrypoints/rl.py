@@ -18,12 +18,14 @@ from core.rl import (
     train_loop,
 )
 from utils.params_io_27b import DEFAULT_ORBAX_CHECKPOINT, load_params, save_params
+from utils.profiling import build_shared_profile_options
 
 REFERENCE_PARAMS_UPDATE_INTERVAL = 400  # as suggested by the R1 paper
 CHECKPOINT_INTERVAL = 25
 ENABLE_PROFILER = False
 PROFILE_STOP_STEP = 5
 PROFILE_LOGDIR = "gs://gemma-3-training-profiles-20260207-165411-1d9c5e-euw4"
+PROFILE_SESSION_PREFIX = "gemma_rl"
 PROFILE_START_BARRIER_NAME = "gemma_rl_profile_start"
 PROFILE_STOP_BARRIER_NAME = "gemma_rl_profile_stop"
 LOGGER = logging.getLogger(__name__)
@@ -55,6 +57,7 @@ def main() -> None:
             "enable_profiler": ENABLE_PROFILER,
             "profile_logdir": PROFILE_LOGDIR,
             "profile_stop_step": PROFILE_STOP_STEP,
+            "profile_session_prefix": PROFILE_SESSION_PREFIX,
         },
     )
 
@@ -68,8 +71,17 @@ def main() -> None:
                     PROFILE_START_BARRIER_NAME,
                 )
                 multihost_utils.sync_global_devices(PROFILE_START_BARRIER_NAME)
-                LOGGER.info("Starting JAX profiler trace to %s...", PROFILE_LOGDIR)
-                jax.profiler.start_trace(PROFILE_LOGDIR)
+                profile_options, profile_session_id = build_shared_profile_options(
+                    PROFILE_SESSION_PREFIX
+                )
+                LOGGER.info(
+                    "Starting JAX profiler trace to %s (session_id=%s)...",
+                    PROFILE_LOGDIR,
+                    profile_session_id,
+                )
+                jax.profiler.start_trace(
+                    PROFILE_LOGDIR, profiler_options=profile_options
+                )
                 profiler_started = True
             except Exception as exc:
                 LOGGER.warning("Failed to start JAX profiler trace: %s", exc)

@@ -9,13 +9,15 @@ import jax.numpy as jnp
 import numpy as np
 
 from core.gemma_forward import config
-from core.gemma_forward_inference import forward_single
+from core.gemma_forward_inference import forward_single, forward_single_impl
 from utils.params_io_27b import DEFAULT_ORBAX_CHECKPOINT, load_params
+from utils.profiling import build_shared_profile_options
 from utils.tokenize_text import detokenize_ids, tokenize_text
 import utils.wandb_logging as wandb_logging
 
 ENABLE_PROFILER = True
 PROFILE_LOGDIR = "gs://gemma-3-training-profiles-20260207-165411-1d9c5e-euw4"
+PROFILE_SESSION_PREFIX = "gemma_inference"
 PROFILE_START_BARRIER_NAME = "gemma_inference_profile_start"
 PROFILE_STOP_BARRIER_NAME = "gemma_inference_profile_stop"
 LOGGER = logging.getLogger(__name__)
@@ -24,6 +26,7 @@ LOGGER = logging.getLogger(__name__)
 def main() -> None:
     max_new_tokens = 400
     profiler_started = False
+    profile_session_id = None
 
     wandb_logging.init_wandb(
         project="gemma-27b-inference",
@@ -31,6 +34,7 @@ def main() -> None:
             "max_new_tokens": max_new_tokens,
             "enable_profiler": ENABLE_PROFILER,
             "profile_logdir": PROFILE_LOGDIR,
+            "profile_session_prefix": PROFILE_SESSION_PREFIX,
         },
     )
     try:
@@ -41,15 +45,23 @@ def main() -> None:
                     PROFILE_START_BARRIER_NAME,
                 )
                 multihost_utils.sync_global_devices(PROFILE_START_BARRIER_NAME)
-                LOGGER.info("Starting JAX profiler trace to %s...", PROFILE_LOGDIR)
-                jax.profiler.start_trace(PROFILE_LOGDIR)
+                profile_options, profile_session_id = build_shared_profile_options(
+                    PROFILE_SESSION_PREFIX
+                )
+                LOGGER.info(
+                    "Starting JAX profiler trace to %s (session_id=%s)...",
+                    PROFILE_LOGDIR,
+                    profile_session_id,
+                )
+                jax.profiler.start_trace(
+                    PROFILE_LOGDIR, profiler_options=profile_options
+                )
                 profiler_started = True
             except Exception as exc:
                 LOGGER.warning("Failed to start JAX profiler trace: %s", exc)
 
         print("Loading weights from Orbax checkpoint...")
-        with jax.profiler.TraceAnnotation("inference/load_params"):
-            params = load_params(DEFAULT_ORBAX_CHECKPOINT)
+        params = load_params(DEFAULT_ORBAX_CHECKPOINT)
         print("Weights loaded.")
 
         prompts = [
@@ -82,45 +94,45 @@ def main() -> None:
         prompt_lengths: list[int] = []
 
         prefill_start = time.perf_counter()
-        with jax.profiler.TraceAnnotation("inference/prefill"):
-            for prompt_tokens in prompt_tokens_batch:
-                Ks_cached = jnp.zeros(
-                    (
-                        config.num_layers,
-                        kv_cache_len,
-                        config.num_key_value_heads,
-                        config.head_dim,
-                    ),
-                    dtype=jnp.bfloat16,
-                )
-                Vs_cached = jnp.zeros(
-                    (
-                        config.num_layers,
-                        kv_cache_len,
-                        config.num_key_value_heads,
-                        config.d_kvq,
-                    ),
-                    dtype=jnp.bfloat16,
-                )
+        for prompt_tokens in prompt_tokens_batch:
+            Ks_cached = jnp.zeros(
+                (
+                    config.num_layers,
+                    kv_cache_len,
+                    config.num_key_value_heads,
+                    config.head_dim,
+                ),
+                dtype=jnp.bfloat16,
+            )
+            Vs_cached = jnp.zeros(
+                (
+                    config.num_layers,
+                    kv_cache_len,
+                    config.num_key_value_heads,
+                    config.d_kvq,
+                ),
+                dtype=jnp.bfloat16,
+            )
 
-                logits = None
-                for pos, token in enumerate(prompt_tokens):
-                    token_id = jnp.array(token, dtype=jnp.int32)
-                    logits, Ks_cached, Vs_cached = forward_single(
-                        token_id, params, pos, Ks_cached, Vs_cached
-                    )
-                assert logits is not None
-                logits.block_until_ready()
+            logits = None
+            for pos, token in enumerate(prompt_tokens):
+                token_id = jnp.array(token, dtype=jnp.int32)
+                logits, Ks_cached, Vs_cached = forward_single(
+                    token_id, params, pos, Ks_cached, Vs_cached
+                )
+            assert logits is not None
+            logits.block_until_ready()
 
-                prefill_logits_per_prompt.append(logits)
-                Ks_cached_per_prompt.append(Ks_cached)
-                Vs_cached_per_prompt.append(Vs_cached)
-                prompt_lengths.append(len(prompt_tokens))
+            prefill_logits_per_prompt.append(logits)
+            Ks_cached_per_prompt.append(Ks_cached)
+            Vs_cached_per_prompt.append(Vs_cached)
+            prompt_lengths.append(len(prompt_tokens))
         prefill_elapsed = time.perf_counter() - prefill_start
 
         logits = jnp.stack(prefill_logits_per_prompt, axis=0)
-        Ks_cached = jnp.stack(Ks_cached_per_prompt, axis=0)
-        Vs_cached = jnp.stack(Vs_cached_per_prompt, axis=0)
+        # Keep KV carry as [layers, batch, ...] to match scan body layout.
+        Ks_cached = jnp.stack(Ks_cached_per_prompt, axis=1)
+        Vs_cached = jnp.stack(Vs_cached_per_prompt, axis=1)
 
         print("Prompts processed.")
         print("Generating batched completions...")
@@ -128,7 +140,11 @@ def main() -> None:
         curr_pos = jnp.array(prompt_lengths, dtype=jnp.int32)
 
         def forward_single_batch(token_ids, params, pos, Ks_cached, Vs_cached):
-            return jax.vmap(forward_single, in_axes=(0, None, 0, 0, 0))(
+            # Use the non-jitted body so the outer run_scan jit can optimize
+            # the whole loop and alias carry buffers across steps.
+            return jax.vmap(
+                forward_single_impl, in_axes=(0, None, 0, 1, 1), out_axes=(0, 1, 1)
+            )(
                 token_ids, params, pos, Ks_cached, Vs_cached
             )
 
@@ -153,19 +169,18 @@ def main() -> None:
 
         # Measure compilation time for jitted scan
         compile_start = time.perf_counter()
-        with jax.profiler.TraceAnnotation("inference/compile"):
-            run_scan_jit = jax.jit(run_scan)
-            # Explicitly lower and compile to avoid running the computation
-            lowered = run_scan_jit.lower(params, init_carry)
-            compiled_scan = lowered.compile()
+        # Donate the decode carry so XLA can alias/reuse its buffers.
+        run_scan_jit = jax.jit(run_scan, donate_argnums=(1,))
+        # Explicitly lower and compile to avoid running the computation
+        lowered = run_scan_jit.lower(params, init_carry)
+        compiled_scan = lowered.compile()
         compile_elapsed = time.perf_counter() - compile_start
         print(f"JIT compilation time: {compile_elapsed:.3f}s")
 
         generation_start = time.perf_counter()
-        with jax.profiler.TraceAnnotation("inference/generate"):
-            final_carry, generated_tokens_array = compiled_scan(params, init_carry)
-            logits, curr_pos, Ks_cached, Vs_cached = final_carry
-            generated_tokens_array.block_until_ready()
+        final_carry, generated_tokens_array = compiled_scan(params, init_carry)
+        logits, curr_pos, Ks_cached, Vs_cached = final_carry
+        generated_tokens_array.block_until_ready()
         generation_elapsed = time.perf_counter() - generation_start
 
         generated_tokens_batch = np.asarray(generated_tokens_array).T.tolist()

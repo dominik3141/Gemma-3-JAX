@@ -18,14 +18,18 @@ dependencies = [
     "google-cloud-logging>=3.13.0",
     "google-cloud-secret-manager>=2.20.0",
     "wandb>=0.17.0",
-    "tensorboard-plugin-profile>=2.21.3",
-    "tensorboard>=2.18.0",
 ]
 
 [project.optional-dependencies]
 cuda = ["jax[cuda12]>=0.8.2"]
 tpu = ["jax[tpu]>=0.8.2", "tpu-info"]
 mps = ["jax-mps>=0.9.5"]
+tensorboard = [
+    "setuptools<81",
+    "tensorboard==2.20.0",
+    "tensorboard-plugin-profile==2.21.5",
+    "xprof==2.21.5",
+]
 
 [tool.ruff.lint]
 ignore = ["E402"]

@@ -21,6 +21,20 @@ All important files are in `core`, all other code is boring and maintained by AI
 
 This is very much a work in progress, but the current code already samples not obviously stupid responses.
 
+## TensorBoard Profile Viewing (UV)
+
+If you downloaded a profile session into a folder like
+`/Users/dffarr/Downloads/tb-logdir/plugins/profile/<session_id>`, run:
+
+```bash
+uv run --extra tensorboard python -m tensorboard.main --logdir /Users/dffarr/Downloads/tb-logdir --port 6006
+```
+
+Then open `http://localhost:6006/#profile`.
+
+For large multihost TPU profiles, prefer the remote VM workflow documented in
+`ops/tensorboard_vm_runbook.md` instead of running TensorBoard locally.
+
 ## ToDo
 
 1. Flash attention[^1]

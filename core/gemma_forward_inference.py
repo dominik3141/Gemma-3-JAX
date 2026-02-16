@@ -84,8 +84,7 @@ def Block_KV_cached(inits, scans) -> jax.Array:
     return (x, pos), (Ks, Vs)
 
 
-@jax.jit
-def forward_single(
+def forward_single_impl(
     x: jax.Array, params: Params, pos: int, Ks_cached: jax.Array, Vs_cached: jax.Array
 ) -> tuple[jax.Array, jax.Array, jax.Array]:
     """
@@ -127,6 +126,13 @@ def forward_single(
     x = params[f"{model_prefix}embed_tokens.weight"] @ x
 
     return x, Ks_cached, Vs_cached
+
+
+@jax.jit
+def forward_single(
+    x: jax.Array, params: Params, pos: int, Ks_cached: jax.Array, Vs_cached: jax.Array
+) -> tuple[jax.Array, jax.Array, jax.Array]:
+    return forward_single_impl(x, params, pos, Ks_cached, Vs_cached)
 
 
 def get_KV(

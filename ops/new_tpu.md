@@ -7,8 +7,8 @@ Cute resources requests for some reason stay around after they have been fulfill
 ## Step 1:
 Create request for TPU
 
-gcloud compute tpus queued-resources create node-8-request \
-  --node-id=node-8 \
+gcloud compute tpus queued-resources create node-12-request \
+  --node-id=node-12 \
   --zone=europe-west4-b \
   --accelerator-type=v5litepod-64 \
   --runtime-version=v2-alpha-tpuv5-lite \
