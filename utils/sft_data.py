@@ -11,6 +11,7 @@ _TOKENIZER_PATH = "data/common/tokenizer.model"
 _DATA_PATH = "data/train/shakespeare.txt"
 _TOKENIZED_PATH = "data/gemma-3-1b/shakespeare_tokenized.npz"
 
+
 def _load_data() -> Int[Array, "corpus_len"]:
     """Loads and tokenizes the Shakespeare dataset, caching to disk."""
     cache_path = Path(_TOKENIZED_PATH)

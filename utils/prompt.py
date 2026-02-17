@@ -14,6 +14,7 @@ EOS_ID = 1
 END_OF_TURN_ID = 106  # tokenizer.piece_to_id("<end_of_turn>")
 STOP_IDS_DEFAULT = (EOS_ID, END_OF_TURN_ID)
 
+
 def load_tokenizer(model_path: str) -> spm.SentencePieceProcessor:
     sp = spm.SentencePieceProcessor()
     sp.Load(model_path)

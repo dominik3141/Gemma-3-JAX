@@ -258,9 +258,10 @@ def load_params(
     mesh_factory=None,
     host_first: bool = True,
     return_mesh: bool = False,
-) -> dict[str, Float[Array, "..."]] | tuple[
-    dict[str, Float[Array, "..."]], jax.sharding.Mesh
-]:
+) -> (
+    dict[str, Float[Array, "..."]]
+    | tuple[dict[str, Float[Array, "..."]], jax.sharding.Mesh]
+):
     ckptr = ocp.StandardCheckpointer()
     meta_tree = _unwrap_metadata(ckptr.metadata(checkpoint_path))
 

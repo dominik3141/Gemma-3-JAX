@@ -18,12 +18,14 @@ But for now we just always take sequences of the same length to avoid this probl
 
 import jax
 import jax.numpy as jnp
-from jaxtyping import Array, Float, Int, PRNGKeyArray
+from beartype import beartype
+from jaxtyping import Array, Float, Int, PRNGKeyArray, jaxtyped
 from core.gemma_forward import forward
 import optax
 from core.gemma_forward import Params
 from utils.sft_data import get_training_sample
 from functools import partial
+
 
 def loss_fn(xs: Int[Array, "seq"], params: Params) -> Float[Array, ""]:
     predictions = forward(xs, params)
@@ -46,9 +48,7 @@ def train(
     lr: float,
     data_sharding,
 ) -> tuple[Params, Float[Array, ""]]:
-    def loss_batched(
-        xss: Int[Array, "batch seq"], params: Params
-    ) -> Float[Array, ""]:
+    def loss_batched(xss: Int[Array, "batch seq"], params: Params) -> Float[Array, ""]:
         return jnp.mean(jax.vmap(loss_fn, in_axes=(0, None))(xss, params))
 
     keys = jax.random.split(key, batch_size)
@@ -60,6 +60,7 @@ def train(
     return SGD(params, grads, lr), loss
 
 
+@jaxtyped(typechecker=beartype)
 def train_loop(
     data_sharding, batch_size: int, params: Params, key: PRNGKeyArray
 ) -> tuple[Params, Float[Array, ""]]:

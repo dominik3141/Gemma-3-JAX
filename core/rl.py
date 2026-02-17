@@ -35,7 +35,8 @@ import socket
 import jax
 import jax.numpy as jnp
 import optax
-from jaxtyping import Array, Float, Int, PRNGKeyArray
+from beartype import beartype
+from jaxtyping import Array, Float, Int, PRNGKeyArray, jaxtyped
 from core.gemma_forward import Params, forward
 from core.gemma_forward_inference import forward_single, get_KV
 from utils.gcp import log_text_async
@@ -46,6 +47,7 @@ import functools
 HOSTNAME = socket.gethostname()
 PID = os.getpid()
 LOGGER = logging.getLogger(__name__)
+
 
 def sample_with_temp(
     key: PRNGKeyArray,
@@ -381,7 +383,9 @@ def objective_function(
 
 
 def mask_fn(
-    log_probs: Float[Array, "traj_len"], answer_end_pos: int | Int[Array, ""], prompt_len: int
+    log_probs: Float[Array, "traj_len"],
+    answer_end_pos: int | Int[Array, ""],
+    prompt_len: int,
 ) -> Float[Array, "traj_len"]:
     """
     Mask out prompt tokens as well as post answer tokens.
@@ -492,7 +496,12 @@ def KL(
 
 def get_group(
     key: PRNGKeyArray, group_size: int, params: Params
-) -> tuple[Int[Array, "group traj_len"], Float[Array, "group traj_len"], Int[Array, ""], Int[Array, "prompt_len"]]:
+) -> tuple[
+    Int[Array, "group traj_len"],
+    Float[Array, "group traj_len"],
+    Int[Array, ""],
+    Int[Array, "prompt_len"],
+]:
     """
     Samples a group of responses.
     """
@@ -554,6 +563,7 @@ def train_inner_loop(
 
 
 @jax.jit
+@jaxtyped(typechecker=beartype)
 def train_loop(
     key: PRNGKeyArray,
     params: Params,

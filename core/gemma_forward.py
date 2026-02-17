@@ -6,16 +6,15 @@ from functools import partial
 
 import jax
 import jax.numpy as jnp
-from jaxtyping import Array, Bool, Float, Int
+from beartype import beartype
+from jaxtyping import Array, Bool, Float, Int, jaxtyped
 
-from config.model import gemma_3_27b as config
+from config.model import gemma_3_1b as config
 
 Params = dict[str, Float[Array, "..."]]
 
 
-def RMSNorm(
-    x: Float[Array, "dim"], gamma: Float[Array, "dim"]
-) -> Float[Array, "dim"]:
+def RMSNorm(x: Float[Array, "dim"], gamma: Float[Array, "dim"]) -> Float[Array, "dim"]:
     # the weights for this norm are simply named '*layernorm*'
     # x and gamma should have the same shape
     epsilon = 1e-6
@@ -23,7 +22,9 @@ def RMSNorm(
 
 
 def RoPE(
-    x: Float[Array, "head_dim"], position: int | Int[Array, ""], theta: float
+    x: Float[Array, "head_dim"],
+    position: int | Int[Array, ""],
+    theta: float | Float[Array, ""],
 ) -> Float[Array, "head_dim"]:
     d = x.shape[-1]
     if d % 2 != 0:
@@ -341,6 +342,7 @@ def get_gemma3_layer_types(num_layers: int) -> Bool[Array, "layer"]:
 
 
 @jax.jit
+@jaxtyped(typechecker=beartype)
 def forward(xs: Int[Array, "seq"], params: Params) -> Float[Array, "seq vocab"]:
     r"""
     Input is a sequence of ids, each referencing a specific token in vocab

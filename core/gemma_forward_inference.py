@@ -20,7 +20,8 @@ TODO:
 
 import jax
 import jax.numpy as jnp
-from jaxtyping import Array, Bool, Float, Int
+from beartype import beartype
+from jaxtyping import Array, Bool, Float, Int, jaxtyped
 from core.gemma_forward import (
     Params,
     RMSNorm,
@@ -32,6 +33,7 @@ from core.gemma_forward import (
     get_gemma3_layer_types,
     postAttn,
 )
+
 
 def group_attention_single(
     Ks: Float[Array, "cache_pos head_dim"],
@@ -98,6 +100,7 @@ def Block_KV_cached(
     return (x, pos), (Ks, Vs)
 
 
+@jaxtyped(typechecker=beartype)
 def forward_single_impl(
     x: int | Int[Array, ""],
     params: Params,
@@ -151,6 +154,7 @@ def forward_single_impl(
 
 
 @jax.jit
+@jaxtyped(typechecker=beartype)
 def forward_single(
     x: int | Int[Array, ""],
     params: Params,

@@ -149,9 +149,9 @@ def run_prefill(
         logits, ks_cached, vs_cached = carry
         is_active = t < prompt_lengths
         pos = jnp.where(is_active, t, prompt_lengths - 1).astype(jnp.int32)
-        token_ids = jnp.where(is_active, prompt_tokens[:, t], prompt_last_tokens).astype(
-            jnp.int32
-        )
+        token_ids = jnp.where(
+            is_active, prompt_tokens[:, t], prompt_last_tokens
+        ).astype(jnp.int32)
         logits, ks_cached, vs_cached = forward_single_batch(
             token_ids, params, pos, ks_cached, vs_cached
         )
@@ -447,7 +447,9 @@ def main() -> None:
         )
         decode_result = decode(params, init_carry, max_new_tokens)
 
-        generated_tokens_batch = np.asarray(decode_result.generated_tokens_array).T.tolist()
+        generated_tokens_batch = np.asarray(
+            decode_result.generated_tokens_array
+        ).T.tolist()
         print_final_outputs(prompt_batch.prompt_tokens_batch, generated_tokens_batch)
         report_and_log_metrics(
             prefill_elapsed=prefill_result.prefill_elapsed,
