@@ -28,48 +28,34 @@ def _normalize_spec_for_rank(
     if len(axes) < rank:
         axes = axes + (None,) * (rank - len(axes))
     elif len(axes) > rank:
-        axes = axes[:rank]
+        raise ValueError(
+            f"PartitionSpec {axes} has more axes than tensor rank {rank}."
+        )
     return PartitionSpec(*axes)
 
 
-def get_stacked_sharding_spec(
+def get_sharding_spec(
     name: str,
     rank: int,
-    is_stacked: bool = False,
 ) -> PartitionSpec:
     """
     Returns the PartitionSpec for a given weight name.
     """
 
-    def make_spec(*dims):
-        if is_stacked:
-            return PartitionSpec(None, *dims)
-        return PartitionSpec(*dims)
-
     if "embed_tokens" in name:
-        spec = make_spec(None, "model")
+        spec = PartitionSpec(None, "model")
     elif "q_proj" in name or "k_proj" in name or "v_proj" in name:
-        spec = make_spec(None, "model")
+        spec = PartitionSpec("model", None)
     elif "o_proj" in name:
-        spec = make_spec("model", None)
+        spec = PartitionSpec(None, "model")
     elif "gate_proj" in name or "up_proj" in name:
-        spec = make_spec(None, "model")
+        spec = PartitionSpec("model", None)
     elif "down_proj" in name:
-        spec = make_spec("model", None)
+        spec = PartitionSpec(None, "model")
     else:
-        spec = make_spec(None) if is_stacked else PartitionSpec(None)
+        spec = PartitionSpec(None)
 
     return _normalize_spec_for_rank(spec, rank)
-
-
-def _is_layer_key(key: str) -> bool:
-    return ".layers." in key
-
-
-def _layer_suffix(key: str) -> str:
-    if ".layers." not in key:
-        return key
-    return key.split(".layers.", 1)[1]
 
 
 def _unwrap_metadata(meta_tree: Any) -> Any:
@@ -152,11 +138,7 @@ def _build_target(
         if sharded:
             if mesh is None:
                 raise ValueError("mesh is required when sharded=True")
-            is_stacked = _is_layer_key(key)
-            name_for_spec = _layer_suffix(key) if is_stacked else key
-            spec = get_stacked_sharding_spec(
-                name_for_spec, len(shape), is_stacked=is_stacked
-            )
+            spec = get_sharding_spec(key, len(shape))
             sharding = NamedSharding(mesh, spec)
             target[key] = jax.ShapeDtypeStruct(shape, dtype, sharding=sharding)
         else:
@@ -230,11 +212,7 @@ def _shard_to_mesh(
     host_index = jax.process_index()
     host_count = jax.process_count()
     for key, value in params.items():
-        is_stacked = _is_layer_key(key)
-        name_for_spec = _layer_suffix(key) if is_stacked else key
-        spec = get_stacked_sharding_spec(
-            name_for_spec, value.ndim, is_stacked=is_stacked
-        )
+        spec = get_sharding_spec(key, value.ndim)
         if is_multihost:
             local_value = _slice_for_host(
                 np.asarray(value),
