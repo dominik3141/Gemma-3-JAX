@@ -61,9 +61,9 @@ class DecodeResult:
 def get_prompts() -> list[str]:
     return [
         "The capital of France is Paris. The capital of Germany is",
-        "The capital of France is Paris. The capital of Italy is",
-        "The capital of France is Paris. The capital of Spain is",
-        "The capital of France is Paris. The capital of Portugal is",
+        "Write a Python function that returns the square root of a number without using the math library.",
+        "Draft a 120-word scene from a science-fiction story where an engineer explains a repair in zero gravity.",
+        "A train leaves New York at 3:15 PM traveling 180 miles at 60 miles per hour. What is the arrival time?",
     ]
 
 

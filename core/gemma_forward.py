@@ -9,7 +9,7 @@ import jax.numpy as jnp
 from beartype import beartype
 from jaxtyping import Array, Bool, Float, Int, jaxtyped
 
-from config.model import gemma_3_1b as config
+from config.model import gemma_3_27b as config
 
 Params = dict[str, Float[Array, "..."]]
 
