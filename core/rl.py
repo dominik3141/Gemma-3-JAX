@@ -512,31 +512,41 @@ def get_group(
 
     # calculate the KV cache of the prompt
     prompt_len = prompt.shape[0]
-    K_cache_batched, V_cache_batched = allocate_kv_cache(1, MAX_RESPONSE_LENGTH)
-    K_cache = K_cache_batched[:, 0, :, :, :]
-    V_cache = V_cache_batched[:, 0, :, :, :]
-    _, K_cache, V_cache = prefill(
+    K_cache_batched, V_cache_batched = allocate_kv_cache(
+        group_size, MAX_RESPONSE_LENGTH
+    )
+
+    # Prefill once because every group element shares the same prompt,
+    # then replicate that prompt KV state across the full group batch.
+    _, K_cache_prefilled, V_cache_prefilled = prefill(
         params,
         prompt,
         prompt_len,
-        K_cache,
-        V_cache,
+        K_cache_batched[:, 0, :, :, :],
+        V_cache_batched[:, 0, :, :, :],
+    )
+    K_cache_group = jnp.broadcast_to(
+        K_cache_prefilled[:, None, :, :, :], K_cache_batched.shape
+    )
+    V_cache_group = jnp.broadcast_to(
+        V_cache_prefilled[:, None, :, :, :], V_cache_batched.shape
     )
 
     all_keys = jax.random.split(key, group_size + 1)
     key, group_keys = all_keys[0], all_keys[1:]
     responses, log_probs = jax.vmap(
-        lambda key: sample_with_temp(
-            key,
-            params,
-            prompt[-1],
-            len(prompt) - 1,
-            K_cache,
-            V_cache,
-            SAMPLE_TEMP,
-            MAX_RESPONSE_LENGTH - len(prompt),
-        )
-    )(group_keys)
+        sample_with_temp,
+        in_axes=(0, None, None, None, 1, 1, None, None),
+    )(
+        group_keys,
+        params,
+        prompt[-1],
+        prompt_len - 1,
+        K_cache_group,
+        V_cache_group,
+        SAMPLE_TEMP,
+        MAX_RESPONSE_LENGTH - prompt_len,
+    )
 
     return (
         responses,
