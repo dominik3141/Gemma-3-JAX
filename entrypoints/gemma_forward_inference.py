@@ -432,8 +432,7 @@ def main() -> None:
         print("Weights loaded.")
 
         prompt_batch = build_prompt_batch(get_prompts())
-        kv_cache_len = 1024 + max_new_tokens
-        assert max_new_tokens + prompt_batch.max_prompt_tokens < kv_cache_len
+        kv_cache_len = prompt_batch.max_prompt_tokens + max_new_tokens + 1
 
         print("Processing prompts (prefill)...")
         prefill_result = prefill(params, prompt_batch, kv_cache_len)
