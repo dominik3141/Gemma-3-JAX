@@ -100,8 +100,9 @@ def Block_KV_cached(
     return (x, pos), (Ks, Vs)
 
 
+@jax.jit
 @jaxtyped(typechecker=beartype)
-def forward_single_impl(
+def forward_single(
     x: int | Int[Array, ""],
     params: Params,
     pos: int | Int[Array, ""],
@@ -153,22 +154,6 @@ def forward_single_impl(
     return x, Ks_cached, Vs_cached
 
 
-@jax.jit
-@jaxtyped(typechecker=beartype)
-def forward_single(
-    x: int | Int[Array, ""],
-    params: Params,
-    pos: int | Int[Array, ""],
-    Ks_cached: Float[Array, "layer cache_pos kv_head head_dim"],
-    Vs_cached: Float[Array, "layer cache_pos kv_head value_dim"],
-) -> tuple[
-    Float[Array, "vocab"],
-    Float[Array, "layer cache_pos kv_head head_dim"],
-    Float[Array, "layer cache_pos kv_head value_dim"],
-]:
-    return forward_single_impl(x, params, pos, Ks_cached, Vs_cached)
-
-
 def get_KV(
     prompt: Int[Array, "seq"], params: Params, cache_size: int
 ) -> tuple[
@@ -215,3 +200,98 @@ def get_KV(
     )
 
     return K_cache, V_cache
+
+
+def allocate_kv_cache(
+    batch_size: int, kv_cache_len: int
+) -> tuple[
+    Float[Array, "layer batch cache_pos kv_head head_dim"],
+    Float[Array, "layer batch cache_pos kv_head value_dim"],
+]:
+    ks_cached = jnp.zeros(
+        (
+            config.num_layers,
+            batch_size,
+            kv_cache_len,
+            config.num_key_value_heads,
+            config.head_dim,
+        ),
+        dtype=jnp.bfloat16,
+    )
+    vs_cached = jnp.zeros(
+        (
+            config.num_layers,
+            batch_size,
+            kv_cache_len,
+            config.num_key_value_heads,
+            config.d_kvq,
+        ),
+        dtype=jnp.bfloat16,
+    )
+    return ks_cached, vs_cached
+
+
+def prefill(
+    params: Params,
+    prompt_tokens: Int[Array, "batch prompt_len"],
+    prompt_lengths: Int[Array, "batch"],
+    prompt_last_tokens: Int[Array, "batch"],
+    kv_cache_len: int,
+) -> tuple[
+    Float[Array, "batch vocab"],
+    Float[Array, "layer batch cache_pos kv_head head_dim"],
+    Float[Array, "layer batch cache_pos kv_head value_dim"],
+]:
+    init_ks_cached, init_vs_cached = allocate_kv_cache(
+        prompt_tokens.shape[0], kv_cache_len
+    )
+    forward_batch = jax.vmap(
+        forward_single, in_axes=(0, None, 0, 1, 1), out_axes=(0, 1, 1)
+    )
+
+    pos0 = jnp.zeros((prompt_tokens.shape[0],), dtype=jnp.int32)
+    logits, ks_cached, vs_cached = forward_batch(
+        prompt_tokens[:, 0], params, pos0, init_ks_cached, init_vs_cached
+    )
+
+    for t in range(1, prompt_tokens.shape[1]):
+        is_active = t < prompt_lengths
+        pos = jnp.where(is_active, t, prompt_lengths - 1).astype(jnp.int32)
+        token_ids = jnp.where(
+            is_active, prompt_tokens[:, t], prompt_last_tokens
+        ).astype(jnp.int32)
+        logits, ks_cached, vs_cached = forward_batch(
+            token_ids, params, pos, ks_cached, vs_cached
+        )
+
+    return logits, ks_cached, vs_cached
+
+
+def decode(
+    params: Params,
+    logits: Float[Array, "batch vocab"],
+    curr_pos: Int[Array, "batch"],
+    ks_cached: Float[Array, "layer batch cache_pos kv_head head_dim"],
+    vs_cached: Float[Array, "layer batch cache_pos kv_head value_dim"],
+    max_new_tokens: int,
+) -> Int[Array, "decode_len batch"]:
+    forward_batch = jax.vmap(
+        forward_single, in_axes=(0, None, 0, 1, 1), out_axes=(0, 1, 1)
+    )
+
+    generated_tokens = []
+
+    for _ in range(max_new_tokens):
+        next_tokens = jnp.argmax(logits, axis=-1).astype(jnp.int32)
+        generated_tokens.append(next_tokens)
+        logits, ks_cached, vs_cached = forward_batch(
+            next_tokens, params, curr_pos, ks_cached, vs_cached
+        )
+        curr_pos = curr_pos + 1
+
+    if generated_tokens:
+        generated_tokens_array = jnp.stack(generated_tokens, axis=0)
+    else:
+        generated_tokens_array = jnp.zeros((0, logits.shape[0]), dtype=jnp.int32)
+
+    return generated_tokens_array

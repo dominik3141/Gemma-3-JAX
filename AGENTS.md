@@ -15,6 +15,8 @@
 - Avoid adding flags/options "just in case" if they are unlikely to be used.
 - For recurring ops workflows, hardcode practical project defaults instead of requiring repeated manual args.
 - When the user asks to "set it up", execute the infra/app setup directly and verify it works end-to-end.
+- Prefer `jaxtyping` annotations for JAX-heavy function signatures when practical.
+- Do not use type aliases in function signatures; keep signatures explicit so they are readable at first sight.
 
 ## Agent memory hygiene
 
