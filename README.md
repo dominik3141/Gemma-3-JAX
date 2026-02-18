@@ -5,7 +5,7 @@ All important files are in `core`, all other code is boring and maintained by AI
 
 ## Core files
 
-1. `gemma_forward.py`. Defines a very simple forward function, so far very optimized for prefill and not at all great for autoregressive sampling (no KV cache, no flash attention).
+1. `gemma_forward_parralel.py`. Defines a very simple forward function, so far very optimized for prefill and not at all great for autoregressive sampling (no KV cache, no flash attention).
 2. `supervised_train.py` Simple next token prediction training utilities using the forward pass.
 3. `rl.py` GRPO training logic for radicating integers (WIP).
 4. `gemma_forward_inference.py` Inference forward logic (`forward_single`, KV cache prefill).

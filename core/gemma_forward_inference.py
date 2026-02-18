@@ -4,7 +4,7 @@ An inference optimized version of the forward function for Gemma.
 We only calculate Q,K,V for a single token, the newest token in our sequence, and expect the K,V
 values for each layer to have been calculated prior to the invocation of our new forward function.
 
-I'm not yet sure whether we should reuse our current forward function in `gemma_forward.py` for the prefill
+I'm not yet sure whether we should reuse our current forward function in `gemma_forward_parralel.py` for the prefill
 step that is supposed to provide us with the prior K,V values, or if we need a third forward function.
 We would lose some compute efficiency by reusing our current forward function as it is optimized
 for pretraining and calculates the next token as every position, while for prefill we would only need
@@ -13,16 +13,13 @@ it to calculate the K,V values.
 This is all getting a bit messy, but it looks like we can hardly avoid duplicating logic if we don't want
 to accept a lot of conditional branching, which might make our code less efficient (and which generally
 isn't something I would consider good style).
-
-TODO:
-    - Extract the logic that is shared among all forward functions to a separate file (RMSNorm etc.)
 """
 
 import jax
 import jax.numpy as jnp
 from beartype import beartype
 from jaxtyping import Array, Bool, Float, Int, jaxtyped
-from core.gemma_forward import (
+from core.gemma_forward_common import (
     Params,
     RMSNorm,
     _model_prefix,
@@ -154,54 +151,6 @@ def forward_single(
     return x, Ks_cached, Vs_cached
 
 
-def get_KV(
-    prompt: Int[Array, "seq"], params: Params, cache_size: int
-) -> tuple[
-    Float[Array, "layer cache_pos kv_head head_dim"],
-    Float[Array, "layer cache_pos kv_head value_dim"],
-]:
-    """
-    Given a tokenized prompt, return the prefilled KV cache.
-    """
-    n = prompt.shape[0]  # prompt should have shape (seq_len)
-
-    assert cache_size >= n
-
-    K_cache = jnp.zeros(
-        (
-            config.num_layers,
-            cache_size,
-            config.num_key_value_heads,
-            config.head_dim,
-        ),
-        dtype=jnp.bfloat16,
-    )
-    V_cache = jnp.zeros(
-        (
-            config.num_layers,
-            cache_size,
-            config.num_key_value_heads,
-            config.d_kvq,
-        ),
-        dtype=jnp.bfloat16,
-    )
-
-    def forward_single_scanable(carry, scans):
-        Ks_cached, Vs_cached = carry
-        x, pos = scans
-
-        _, Ks_cached, Vs_cached = forward_single(x, params, pos, Ks_cached, Vs_cached)
-
-        return (Ks_cached, Vs_cached), None
-
-    pos = jnp.arange(0, n)
-    (K_cache, V_cache), _ = jax.lax.scan(
-        forward_single_scanable, (K_cache, V_cache), (prompt, pos)
-    )
-
-    return K_cache, V_cache
-
-
 def allocate_kv_cache(
     batch_size: int, kv_cache_len: int
 ) -> tuple[
@@ -239,23 +188,26 @@ def prefill(
     kv_cache_len: int,
 ) -> tuple[
     Float[Array, "batch vocab"],
-    Float[Array, "layer batch cache_pos kv_head head_dim"],
-    Float[Array, "layer batch cache_pos kv_head value_dim"],
+    Float[Array, "layer batch kv_cache_len kv_head head_dim"],
+    Float[Array, "layer batch kv_cache_len kv_head value_dim"],
 ]:
-    init_ks_cached, init_vs_cached = allocate_kv_cache(
-        prompt_tokens.shape[0], kv_cache_len
-    )
+    # One fixed-size KV cache per prompt in the batch.
+    ks_cached, vs_cached = allocate_kv_cache(prompt_tokens.shape[0], kv_cache_len)
+    # Single-token forward, vectorized over batch.
     forward_batch = jax.vmap(
         forward_single, in_axes=(0, None, 0, 1, 1), out_axes=(0, 1, 1)
     )
 
+    # Bootstrap with token 0 at position 0 for every prompt.
     pos0 = jnp.zeros((prompt_tokens.shape[0],), dtype=jnp.int32)
     logits, ks_cached, vs_cached = forward_batch(
-        prompt_tokens[:, 0], params, pos0, init_ks_cached, init_vs_cached
+        prompt_tokens[:, 0], params, pos0, ks_cached, vs_cached
     )
 
     for t in range(1, prompt_tokens.shape[1]):
         is_active = t < prompt_lengths
+        # Finished prompts stay pinned to their last real token/position so
+        # shorter prompts do not advance cache positions past prompt end.
         pos = jnp.where(is_active, t, prompt_lengths - 1).astype(jnp.int32)
         token_ids = jnp.where(
             is_active, prompt_tokens[:, t], prompt_last_tokens

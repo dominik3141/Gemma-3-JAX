@@ -37,8 +37,8 @@ import jax.numpy as jnp
 import optax
 from beartype import beartype
 from jaxtyping import Array, Float, Int, PRNGKeyArray, jaxtyped
-from core.gemma_forward import Params, forward
-from core.gemma_forward_inference import forward_single, get_KV
+from core.gemma_forward_parralel import Params, forward_parralel
+from core.gemma_forward_inference import forward_single, prefill
 from utils.gcp import log_text_async
 from utils.tokenize_text import tokenize_text, detokenize_ids
 import utils.wandb_logging as wandb_logging
@@ -446,7 +446,7 @@ def log_prop_of_trajectory(
     xs = jnp.concatenate([prompt, trajectory])
 
     # get the logits for the full trajectory
-    logits = forward(xs, params)
+    logits = forward_parralel(xs, params)
 
     # use same temperature as at sample time
     logits = logits / SAMPLE_TEMP
@@ -511,7 +511,19 @@ def get_group(
     prompt = get_prompt(int_to_radicate)  # prompt is the same for the whole group
 
     # calculate the KV cache of the prompt
-    K_cache, V_cache = get_KV(prompt, params, MAX_RESPONSE_LENGTH)
+    prompt_len = prompt.shape[0]
+    prompt_tokens = prompt[None, :]
+    prompt_lengths = jnp.array([prompt_len], dtype=jnp.int32)
+    prompt_last_tokens = jnp.array([prompt[-1]], dtype=jnp.int32)
+    _, K_cache_batched, V_cache_batched = prefill(
+        params,
+        prompt_tokens,
+        prompt_lengths,
+        prompt_last_tokens,
+        MAX_RESPONSE_LENGTH,
+    )
+    K_cache = K_cache_batched[:, 0, :, :, :]
+    V_cache = V_cache_batched[:, 0, :, :, :]
 
     all_keys = jax.random.split(key, group_size + 1)
     key, group_keys = all_keys[0], all_keys[1:]

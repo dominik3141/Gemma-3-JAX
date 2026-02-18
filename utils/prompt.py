@@ -4,7 +4,7 @@ import jax
 import jax.numpy as jnp
 import sentencepiece as spm
 from jaxtyping import Array, Float, PRNGKeyArray
-from core.gemma_forward import Params, forward
+from core.gemma_forward_parralel import Params, forward_parralel
 from utils.params_io import DEFAULT_ORBAX_CHECKPOINT, load_params
 
 # Load tokenizer
@@ -85,7 +85,7 @@ def generate(
 
         xs = jnp.asarray(padded_ids, dtype=jnp.int32)
 
-        logits = forward(xs, params)
+        logits = forward_parralel(xs, params)
         next_logits = logits[current_len - 1]  # pick logits for last real token
         next_token, rng = sample_next_token(next_logits, rng, temperature)
         token_ids.append(next_token)

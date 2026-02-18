@@ -20,15 +20,15 @@ import jax
 import jax.numpy as jnp
 from beartype import beartype
 from jaxtyping import Array, Float, Int, PRNGKeyArray, jaxtyped
-from core.gemma_forward import forward
+from core.gemma_forward_parralel import forward_parralel
 import optax
-from core.gemma_forward import Params
+from core.gemma_forward_parralel import Params
 from utils.sft_data import get_training_sample
 from functools import partial
 
 
 def loss_fn(xs: Int[Array, "seq"], params: Params) -> Float[Array, ""]:
-    predictions = forward(xs, params)
+    predictions = forward_parralel(xs, params)
     input_len = xs.shape[0]
     predictions = predictions[: input_len - 1]  # remove padding
     labels = xs[1:]
