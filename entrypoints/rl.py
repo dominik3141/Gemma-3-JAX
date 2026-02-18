@@ -33,10 +33,8 @@ LOGGER = logging.getLogger(__name__)
 
 def main() -> None:
     key = jax.random.PRNGKey(42)
-    params = load_params(
-        DEFAULT_ORBAX_CHECKPOINT,
-        mesh_factory=lambda: jax.sharding.Mesh(jax.devices(), axis_names=("model",)),
-    )
+    mesh = jax.sharding.Mesh(jax.devices(), axis_names=("model",))
+    params = load_params(DEFAULT_ORBAX_CHECKPOINT, mesh)
 
     optimizer_state = optax.adam(LEARNING_RATE).init(params)
     params_ref = params

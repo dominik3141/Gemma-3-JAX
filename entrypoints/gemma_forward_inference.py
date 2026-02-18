@@ -427,7 +427,8 @@ def main() -> None:
         profiler_started = start_profiler()
 
         print("Loading weights from Orbax checkpoint...")
-        params = load_params(DEFAULT_ORBAX_CHECKPOINT)
+        mesh = jax.sharding.Mesh(jax.devices(), axis_names=("model",))
+        params = load_params(DEFAULT_ORBAX_CHECKPOINT, mesh)
         print("Weights loaded.")
 
         prompt_batch = build_prompt_batch(get_prompts())

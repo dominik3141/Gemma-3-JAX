@@ -21,9 +21,8 @@ def main(num_batches: int = 100):
         device_mesh = mesh_utils.create_device_mesh((batch_axis_size, model_axis_size))
         return Mesh(device_mesh, axis_names=("batch", "model"))
 
-    params, mesh = load_params(
-        DEFAULT_ORBAX_CHECKPOINT, mesh_factory=_make_mesh, return_mesh=True
-    )
+    mesh = _make_mesh()
+    params = load_params(DEFAULT_ORBAX_CHECKPOINT, mesh)
     print("Weights loaded.")
 
     data_sharding = NamedSharding(mesh, PartitionSpec("batch"))

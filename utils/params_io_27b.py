@@ -1,300 +1,389 @@
 r"""
-Can retrieve and save parameters of Gemma 3 27B.
-Logic for this version is a bit more complicated than for the 1b version due to the need for sharded loading.
+Load and save Gemma 3 27B parameters.
+
+This module intentionally hardcodes the expected checkpoint schema from:
+gs://gemma-3-27b-pt-orbax-b76114af/gemma-3-27b-pt-orbax
 """
 
 from __future__ import annotations
 
 import uuid
-from typing import Iterable, Tuple, Any
 
 import jax
+import jax.numpy as jnp
 import numpy as np
-from jaxtyping import Array, Float
-from jax.sharding import NamedSharding, PartitionSpec
 import orbax.checkpoint as ocp
 from jax.experimental import multihost_utils
+from jax.sharding import Mesh, NamedSharding, PartitionSpec
+from jaxtyping import Array, Float
 
+Params = dict[str, Float[Array, "..."]]
 
 DEFAULT_ORBAX_CHECKPOINT = "gs://gemma-3-27b-pt-orbax-b76114af/gemma-3-27b-pt-orbax"
 DEFAULT_GCS_SAVE_ROOT = "gs://gemma-tpu-weights-us-west4-482802-euw4/checkpoints"
+_EXPECTED_DTYPE = jnp.bfloat16
 
 
-def _normalize_spec_for_rank(
-    spec: PartitionSpec,
-    rank: int,
-) -> PartitionSpec:
-    axes = tuple(spec)
-    if len(axes) < rank:
-        axes = axes + (None,) * (rank - len(axes))
-    elif len(axes) > rank:
-        axes = axes[:rank]
-    return PartitionSpec(*axes)
+EXPECTED_TARGET_SPECS: dict[str, jax.ShapeDtypeStruct] = {
+    "language_model.model.embed_tokens.weight": jax.ShapeDtypeStruct(
+        (262208, 5376), _EXPECTED_DTYPE
+    ),
+    "language_model.model.layers.input_layernorm.weight": jax.ShapeDtypeStruct(
+        (62, 5376), _EXPECTED_DTYPE
+    ),
+    "language_model.model.layers.mlp.down_proj.weight": jax.ShapeDtypeStruct(
+        (62, 5376, 21504), _EXPECTED_DTYPE
+    ),
+    "language_model.model.layers.mlp.gate_proj.weight": jax.ShapeDtypeStruct(
+        (62, 21504, 5376), _EXPECTED_DTYPE
+    ),
+    "language_model.model.layers.mlp.up_proj.weight": jax.ShapeDtypeStruct(
+        (62, 21504, 5376), _EXPECTED_DTYPE
+    ),
+    "language_model.model.layers.post_attention_layernorm.weight": jax.ShapeDtypeStruct(
+        (62, 5376), _EXPECTED_DTYPE
+    ),
+    "language_model.model.layers.post_feedforward_layernorm.weight": jax.ShapeDtypeStruct(
+        (62, 5376), _EXPECTED_DTYPE
+    ),
+    "language_model.model.layers.pre_feedforward_layernorm.weight": jax.ShapeDtypeStruct(
+        (62, 5376), _EXPECTED_DTYPE
+    ),
+    "language_model.model.layers.self_attn.k_norm.weight": jax.ShapeDtypeStruct(
+        (62, 128), _EXPECTED_DTYPE
+    ),
+    "language_model.model.layers.self_attn.k_proj.weight": jax.ShapeDtypeStruct(
+        (62, 2048, 5376), _EXPECTED_DTYPE
+    ),
+    "language_model.model.layers.self_attn.o_proj.weight": jax.ShapeDtypeStruct(
+        (62, 5376, 4096), _EXPECTED_DTYPE
+    ),
+    "language_model.model.layers.self_attn.q_norm.weight": jax.ShapeDtypeStruct(
+        (62, 128), _EXPECTED_DTYPE
+    ),
+    "language_model.model.layers.self_attn.q_proj.weight": jax.ShapeDtypeStruct(
+        (62, 4096, 5376), _EXPECTED_DTYPE
+    ),
+    "language_model.model.layers.self_attn.v_proj.weight": jax.ShapeDtypeStruct(
+        (62, 2048, 5376), _EXPECTED_DTYPE
+    ),
+    "language_model.model.norm.weight": jax.ShapeDtypeStruct((5376,), _EXPECTED_DTYPE),
+    "multi_modal_projector.mm_input_projection_weight": jax.ShapeDtypeStruct(
+        (1152, 5376), _EXPECTED_DTYPE
+    ),
+    "multi_modal_projector.mm_soft_emb_norm.weight": jax.ShapeDtypeStruct(
+        (1152,), _EXPECTED_DTYPE
+    ),
+    "vision_tower.vision_model.embeddings.patch_embedding.bias": jax.ShapeDtypeStruct(
+        (1152,), _EXPECTED_DTYPE
+    ),
+    "vision_tower.vision_model.embeddings.patch_embedding.weight": jax.ShapeDtypeStruct(
+        (1152, 3, 14, 14), _EXPECTED_DTYPE
+    ),
+    "vision_tower.vision_model.embeddings.position_embedding.weight": jax.ShapeDtypeStruct(
+        (4096, 1152), _EXPECTED_DTYPE
+    ),
+    "vision_tower.vision_model.encoder.layers.layer_norm1.bias": jax.ShapeDtypeStruct(
+        (27, 1152), _EXPECTED_DTYPE
+    ),
+    "vision_tower.vision_model.encoder.layers.layer_norm1.weight": jax.ShapeDtypeStruct(
+        (27, 1152), _EXPECTED_DTYPE
+    ),
+    "vision_tower.vision_model.encoder.layers.layer_norm2.bias": jax.ShapeDtypeStruct(
+        (27, 1152), _EXPECTED_DTYPE
+    ),
+    "vision_tower.vision_model.encoder.layers.layer_norm2.weight": jax.ShapeDtypeStruct(
+        (27, 1152), _EXPECTED_DTYPE
+    ),
+    "vision_tower.vision_model.encoder.layers.mlp.fc1.bias": jax.ShapeDtypeStruct(
+        (27, 4304), _EXPECTED_DTYPE
+    ),
+    "vision_tower.vision_model.encoder.layers.mlp.fc1.weight": jax.ShapeDtypeStruct(
+        (27, 4304, 1152), _EXPECTED_DTYPE
+    ),
+    "vision_tower.vision_model.encoder.layers.mlp.fc2.bias": jax.ShapeDtypeStruct(
+        (27, 1152), _EXPECTED_DTYPE
+    ),
+    "vision_tower.vision_model.encoder.layers.mlp.fc2.weight": jax.ShapeDtypeStruct(
+        (27, 1152, 4304), _EXPECTED_DTYPE
+    ),
+    "vision_tower.vision_model.encoder.layers.self_attn.k_proj.bias": jax.ShapeDtypeStruct(
+        (27, 1152), _EXPECTED_DTYPE
+    ),
+    "vision_tower.vision_model.encoder.layers.self_attn.k_proj.weight": jax.ShapeDtypeStruct(
+        (27, 1152, 1152), _EXPECTED_DTYPE
+    ),
+    "vision_tower.vision_model.encoder.layers.self_attn.out_proj.bias": jax.ShapeDtypeStruct(
+        (27, 1152), _EXPECTED_DTYPE
+    ),
+    "vision_tower.vision_model.encoder.layers.self_attn.out_proj.weight": jax.ShapeDtypeStruct(
+        (27, 1152, 1152), _EXPECTED_DTYPE
+    ),
+    "vision_tower.vision_model.encoder.layers.self_attn.q_proj.bias": jax.ShapeDtypeStruct(
+        (27, 1152), _EXPECTED_DTYPE
+    ),
+    "vision_tower.vision_model.encoder.layers.self_attn.q_proj.weight": jax.ShapeDtypeStruct(
+        (27, 1152, 1152), _EXPECTED_DTYPE
+    ),
+    "vision_tower.vision_model.encoder.layers.self_attn.v_proj.bias": jax.ShapeDtypeStruct(
+        (27, 1152), _EXPECTED_DTYPE
+    ),
+    "vision_tower.vision_model.encoder.layers.self_attn.v_proj.weight": jax.ShapeDtypeStruct(
+        (27, 1152, 1152), _EXPECTED_DTYPE
+    ),
+    "vision_tower.vision_model.post_layernorm.bias": jax.ShapeDtypeStruct(
+        (1152,), _EXPECTED_DTYPE
+    ),
+    "vision_tower.vision_model.post_layernorm.weight": jax.ShapeDtypeStruct(
+        (1152,), _EXPECTED_DTYPE
+    ),
+}
+
+SHARDING_PLAN: dict[str, PartitionSpec] = {
+    "language_model.model.embed_tokens.weight": PartitionSpec(None, "model"),
+    "language_model.model.layers.input_layernorm.weight": PartitionSpec(None, None),
+    "language_model.model.layers.mlp.down_proj.weight": PartitionSpec(
+        None, "model", None
+    ),
+    "language_model.model.layers.mlp.gate_proj.weight": PartitionSpec(
+        None, None, "model"
+    ),
+    "language_model.model.layers.mlp.up_proj.weight": PartitionSpec(None, None, "model"),
+    "language_model.model.layers.post_attention_layernorm.weight": PartitionSpec(
+        None, None
+    ),
+    "language_model.model.layers.post_feedforward_layernorm.weight": PartitionSpec(
+        None, None
+    ),
+    "language_model.model.layers.pre_feedforward_layernorm.weight": PartitionSpec(
+        None, None
+    ),
+    "language_model.model.layers.self_attn.k_norm.weight": PartitionSpec(None, None),
+    "language_model.model.layers.self_attn.k_proj.weight": PartitionSpec(
+        None, None, "model"
+    ),
+    "language_model.model.layers.self_attn.o_proj.weight": PartitionSpec(
+        None, "model", None
+    ),
+    "language_model.model.layers.self_attn.q_norm.weight": PartitionSpec(None, None),
+    "language_model.model.layers.self_attn.q_proj.weight": PartitionSpec(
+        None, None, "model"
+    ),
+    "language_model.model.layers.self_attn.v_proj.weight": PartitionSpec(
+        None, None, "model"
+    ),
+    "language_model.model.norm.weight": PartitionSpec(None),
+    "multi_modal_projector.mm_input_projection_weight": PartitionSpec(None, None),
+    "multi_modal_projector.mm_soft_emb_norm.weight": PartitionSpec(None),
+    "vision_tower.vision_model.embeddings.patch_embedding.bias": PartitionSpec(None),
+    "vision_tower.vision_model.embeddings.patch_embedding.weight": PartitionSpec(
+        None, None, None, None
+    ),
+    "vision_tower.vision_model.embeddings.position_embedding.weight": PartitionSpec(
+        None, None
+    ),
+    "vision_tower.vision_model.encoder.layers.layer_norm1.bias": PartitionSpec(
+        None, None
+    ),
+    "vision_tower.vision_model.encoder.layers.layer_norm1.weight": PartitionSpec(
+        None, None
+    ),
+    "vision_tower.vision_model.encoder.layers.layer_norm2.bias": PartitionSpec(
+        None, None
+    ),
+    "vision_tower.vision_model.encoder.layers.layer_norm2.weight": PartitionSpec(
+        None, None
+    ),
+    "vision_tower.vision_model.encoder.layers.mlp.fc1.bias": PartitionSpec(None, None),
+    "vision_tower.vision_model.encoder.layers.mlp.fc1.weight": PartitionSpec(
+        None, None, None
+    ),
+    "vision_tower.vision_model.encoder.layers.mlp.fc2.bias": PartitionSpec(None, None),
+    "vision_tower.vision_model.encoder.layers.mlp.fc2.weight": PartitionSpec(
+        None, None, None
+    ),
+    "vision_tower.vision_model.encoder.layers.self_attn.k_proj.bias": PartitionSpec(
+        None, None
+    ),
+    "vision_tower.vision_model.encoder.layers.self_attn.k_proj.weight": PartitionSpec(
+        None, None, "model"
+    ),
+    "vision_tower.vision_model.encoder.layers.self_attn.out_proj.bias": PartitionSpec(
+        None, None
+    ),
+    "vision_tower.vision_model.encoder.layers.self_attn.out_proj.weight": PartitionSpec(
+        None, None, None
+    ),
+    "vision_tower.vision_model.encoder.layers.self_attn.q_proj.bias": PartitionSpec(
+        None, None
+    ),
+    "vision_tower.vision_model.encoder.layers.self_attn.q_proj.weight": PartitionSpec(
+        None, None, "model"
+    ),
+    "vision_tower.vision_model.encoder.layers.self_attn.v_proj.bias": PartitionSpec(
+        None, None
+    ),
+    "vision_tower.vision_model.encoder.layers.self_attn.v_proj.weight": PartitionSpec(
+        None, None, "model"
+    ),
+    "vision_tower.vision_model.post_layernorm.bias": PartitionSpec(None),
+    "vision_tower.vision_model.post_layernorm.weight": PartitionSpec(None),
+}
+
+EXPECTED_KEYS: tuple[str, ...] = tuple(EXPECTED_TARGET_SPECS.keys())
 
 
-def get_stacked_sharding_spec(
-    name: str,
-    rank: int,
-    is_stacked: bool = False,
-) -> PartitionSpec:
+def _build_target() -> dict[str, jax.ShapeDtypeStruct]:
     """
-    Returns the PartitionSpec for a given weight name.
+    Build the abstract pytree Orbax restores into.
+
+    The checkpoint bytes are fixed, so this only encodes expected shape/dtype.
+    We attach sharding later in a separate step.
     """
-
-    def make_spec(*dims):
-        if is_stacked:
-            return PartitionSpec(None, *dims)
-        return PartitionSpec(*dims)
-
-    if "embed_tokens" in name:
-        spec = make_spec(None, "model")
-    elif "q_proj" in name or "k_proj" in name or "v_proj" in name:
-        spec = make_spec(None, "model")
-    elif "o_proj" in name:
-        spec = make_spec("model", None)
-    elif "gate_proj" in name or "up_proj" in name:
-        spec = make_spec(None, "model")
-    elif "down_proj" in name:
-        spec = make_spec("model", None)
-    else:
-        spec = make_spec(None) if is_stacked else PartitionSpec(None)
-
-    return _normalize_spec_for_rank(spec, rank)
-
-
-def _is_layer_key(key: str) -> bool:
-    return ".layers." in key
-
-
-def _layer_suffix(key: str) -> str:
-    if ".layers." not in key:
-        return key
-    return key.split(".layers.", 1)[1]
-
-
-def _unwrap_metadata(meta_tree: Any) -> Any:
-    if hasattr(meta_tree, "item_metadata"):
-        return meta_tree.item_metadata
-    return meta_tree
-
-
-def _path_to_key(path: Iterable[Any]) -> str:
-    if len(path) == 1:
-        p = path[0]
-        if hasattr(p, "key"):
-            return p.key
-        if isinstance(p, str):
-            return p
-    parts = []
-    for p in path:
-        if hasattr(p, "key"):
-            parts.append(str(p.key))
-        elif hasattr(p, "idx"):
-            parts.append(str(p.idx))
-        else:
-            parts.append(str(p))
-    return ".".join(parts)
-
-
-def _iter_metadata(meta_tree: Any) -> Iterable[Tuple[str, Any]]:
-    if isinstance(meta_tree, dict):
-        for key, meta in meta_tree.items():
-            yield _normalize_key(key), meta
-        return
-
-    leaves, _ = jax.tree_util.tree_flatten_with_path(meta_tree)
-    for path, meta in leaves:
-        key = _path_to_key(path)
-        yield _normalize_key(key), meta
-
-
-def _normalize_key(key: Any) -> str:
-    if isinstance(key, tuple) and len(key) == 1 and isinstance(key[0], str):
-        return key[0]
-    if isinstance(key, str):
-        return key
-    return str(key)
-
-
-def _meta_shape_dtype(meta: Any) -> Tuple[Tuple[int, ...], Any]:
-    if hasattr(meta, "shape"):
-        shape = tuple(meta.shape)
-    elif isinstance(meta, dict) and "shape" in meta:
-        shape = tuple(meta["shape"])
-    else:
-        raise ValueError("Missing shape in checkpoint metadata.")
-
-    if hasattr(meta, "dtype"):
-        dtype = meta.dtype
-    elif isinstance(meta, dict) and "dtype" in meta:
-        dtype = meta["dtype"]
-    else:
-        raise ValueError("Missing dtype in checkpoint metadata.")
-
-    return shape, dtype
-
-
-def _join_checkpoint_path(root: str, name: str) -> str:
-    if root.endswith("/"):
-        return f"{root}{name}"
-    return f"{root}/{name}"
-
-
-def _build_target(
-    meta_tree: Any,
-    *,
-    mesh: jax.sharding.Mesh | None,
-    sharded: bool,
-) -> dict[str, jax.ShapeDtypeStruct]:
-    target: dict[str, jax.ShapeDtypeStruct] = {}
-    for key, meta in _iter_metadata(meta_tree):
-        shape, dtype = _meta_shape_dtype(meta)
-        if sharded:
-            if mesh is None:
-                raise ValueError("mesh is required when sharded=True")
-            is_stacked = _is_layer_key(key)
-            name_for_spec = _layer_suffix(key) if is_stacked else key
-            spec = get_stacked_sharding_spec(
-                name_for_spec, len(shape), is_stacked=is_stacked
-            )
-            sharding = NamedSharding(mesh, spec)
-            target[key] = jax.ShapeDtypeStruct(shape, dtype, sharding=sharding)
-        else:
-            target[key] = jax.ShapeDtypeStruct(shape, dtype)
-    return target
+    return dict(EXPECTED_TARGET_SPECS)
 
 
 def _restore_to_host(
     ckptr: ocp.StandardCheckpointer,
     checkpoint_path: str,
-    meta_tree: Any,
-) -> dict[str, Float[Array, "..."]]:
+) -> Params:
+    """
+    Restore tensors to CPU RAM first.
+
+    This keeps loading and sharding as separate steps, which makes multihost
+    behavior easier to reason about and avoids relying on implicit placement.
+    """
+    # restore to host memory first, then explicitly place/shard below
     cpu_device = jax.devices("cpu")[0]
-    target = _build_target(meta_tree, mesh=None, sharded=False)
+    target = _build_target()
     with jax.default_device(cpu_device):
         return ckptr.restore(checkpoint_path, target)
-
-
-def _empty_host_tree(meta_tree: Any) -> dict[str, np.ndarray]:
-    host_tree: dict[str, np.ndarray] = {}
-    for key, meta in _iter_metadata(meta_tree):
-        shape, dtype = _meta_shape_dtype(meta)
-        host_tree[key] = np.zeros(shape, dtype=dtype)
-    return host_tree
-
-
-def _restore_to_host_multihost(
-    ckptr: ocp.StandardCheckpointer,
-    checkpoint_path: str,
-    meta_tree: Any,
-    *,
-    is_source: bool,
-) -> dict[str, np.ndarray]:
-    # Temporary fallback: each host restores directly to CPU memory to avoid
-    # TPU HBM pressure from broadcast_one_to_all.
-    return _restore_to_host(ckptr, checkpoint_path, meta_tree)
 
 
 def _slice_for_host(
     value: np.ndarray,
     spec: PartitionSpec,
-    *,
-    host_index: int,
-    host_count: int,
+    mesh: Mesh,
 ) -> np.ndarray:
+    """
+    Take only the local shard for this process when a tensor is model-sharded.
+
+    We derive the split from the mesh's `model` axis, not from process_count.
+    That means additional mesh axes (for example `data`) can replicate params
+    without changing the sharding plan.
+    """
     axes = tuple(spec)
-    if "model" not in axes or host_count == 1:
+    if "model" not in axes:
         return value
+
     if axes.count("model") > 1:
         raise ValueError("Multiple 'model' axes not supported in host slicing.")
-    axis = axes.index("model")
-    dim = value.shape[axis]
-    if dim % host_count != 0:
+
+    if "model" not in mesh.axis_names:
+        raise ValueError("Mesh is missing required axis name 'model'.")
+
+    tensor_axis = axes.index("model")
+    model_axis = mesh.axis_names.index("model")
+    model_axis_size = mesh.devices.shape[model_axis]
+
+    dim = value.shape[tensor_axis]
+    if dim % model_axis_size != 0:
         raise ValueError(
-            f"Axis {axis} with size {dim} is not divisible by host count {host_count}."
+            f"Axis {tensor_axis} with size {dim} is not divisible by "
+            f"mesh model axis size {model_axis_size}."
         )
-    chunk = dim // host_count
-    start = host_index * chunk
-    end = start + chunk
+
+    process_index = jax.process_index()
+    model_positions: list[int] = []
+    for model_i in range(model_axis_size):
+        index = [slice(None)] * mesh.devices.ndim
+        index[model_axis] = model_i
+        device_slice = mesh.devices[tuple(index)]
+        process_ids = {device.process_index for device in np.ravel(device_slice)}
+        if process_index in process_ids:
+            model_positions.append(model_i)
+
+    if not model_positions:
+        raise ValueError(
+            f"Process {process_index} owns no positions on mesh model axis."
+        )
+
+    if any(b != a + 1 for a, b in zip(model_positions, model_positions[1:])):
+        raise ValueError(
+            "Model-axis positions for this process are not contiguous; "
+            "cannot slice host tensor as one block."
+        )
+
+    chunk = dim // model_axis_size
+    start = model_positions[0] * chunk
+    end = (model_positions[-1] + 1) * chunk
     slices = [slice(None)] * value.ndim
-    slices[axis] = slice(start, end)
+    slices[tensor_axis] = slice(start, end)
     return value[tuple(slices)]
 
 
-def _shard_to_mesh(
-    params: dict[str, Float[Array, "..."]],
-    mesh: jax.sharding.Mesh,
-) -> dict[str, Float[Array, "..."]]:
-    sharded: dict[str, Float[Array, "..."]] = {}
+def _shard_to_mesh(params: Params, mesh: Mesh) -> Params:
+    """
+    Convert host arrays into global arrays with our hardcoded sharding.
+
+    On single host this is a straight `device_put` with NamedSharding.
+    On multihost we first take the local chunk and then stitch globals with
+    `host_local_array_to_global_array`.
+    """
+    sharded: Params = {}
     is_multihost = jax.process_count() > 1
-    host_index = jax.process_index()
-    host_count = jax.process_count()
-    for key, value in params.items():
-        is_stacked = _is_layer_key(key)
-        name_for_spec = _layer_suffix(key) if is_stacked else key
-        spec = get_stacked_sharding_spec(
-            name_for_spec, value.ndim, is_stacked=is_stacked
-        )
+
+    for key in EXPECTED_KEYS:
+        value = params[key]
+        spec = SHARDING_PLAN[key]
+        value_np = np.asarray(value)
+
         if is_multihost:
+            # each host only materializes its local model-axis chunk
             local_value = _slice_for_host(
-                np.asarray(value),
+                value_np,
                 spec,
-                host_index=host_index,
-                host_count=host_count,
+                mesh,
             )
             sharded[key] = multihost_utils.host_local_array_to_global_array(
-                local_value, mesh, spec
+                local_value,
+                mesh,
+                spec,
             )
         else:
             sharding = NamedSharding(mesh, spec)
-            sharded[key] = jax.device_put(value, sharding)
+            sharded[key] = jax.device_put(value_np, sharding)
     return sharded
+
+
+def _join_checkpoint_path(root: str, name: str) -> str:
+    """Join checkpoint root and id without caring about trailing slashes."""
+    return f"{root.rstrip('/')}/{name}"
 
 
 def load_params(
     checkpoint_path: str,
-    mesh: jax.sharding.Mesh | None = None,
-    *,
-    mesh_factory=None,
-    host_first: bool = True,
-    return_mesh: bool = False,
-) -> (
-    dict[str, Float[Array, "..."]]
-    | tuple[dict[str, Float[Array, "..."]], jax.sharding.Mesh]
-):
+    mesh: Mesh,
+) -> Params:
+    """
+    Load the 27B checkpoint into a user-provided mesh.
+
+    This function is intentionally opinionated now:
+    1. restore the known checkpoint schema to host memory
+    2. apply the fixed sharding plan using the given mesh
+    3. return sharded params
+    """
     ckptr = ocp.StandardCheckpointer()
-    meta_tree = _unwrap_metadata(ckptr.metadata(checkpoint_path))
-
-    if host_first:
-        # For now, restore on every host to avoid full-tensor device_put during
-        # multihost broadcast.
-        cpu_state = _restore_to_host(ckptr, checkpoint_path, meta_tree)
-        if mesh is None:
-            if mesh_factory is None:
-                mesh_factory = lambda: jax.sharding.Mesh(
-                    jax.devices(), axis_names=("model",)
-                )
-            mesh = mesh_factory()
-        params = _shard_to_mesh(cpu_state, mesh)
-        del cpu_state
-    else:
-        if mesh is None:
-            if mesh_factory is None:
-                mesh_factory = lambda: jax.sharding.Mesh(
-                    jax.devices(), axis_names=("model",)
-                )
-            mesh = mesh_factory()
-        target = _build_target(meta_tree, mesh=mesh, sharded=True)
-        params = ckptr.restore(checkpoint_path, target)
-
-    if return_mesh:
-        return params, mesh
+    # this avoids full-tensor device_put on multihost setups
+    cpu_state = _restore_to_host(ckptr, checkpoint_path)
+    params = _shard_to_mesh(cpu_state, mesh)
     return params
 
 
-def save_params(
-    params: dict[str, Float[Array, "..."]],
-) -> str:
+def save_params(params: Params) -> str:
+    """
+    Save params to the default GCS checkpoint root with a random checkpoint id.
+    """
     checkpoint_id = uuid.uuid4().hex
     checkpoint_path = _join_checkpoint_path(DEFAULT_GCS_SAVE_ROOT, checkpoint_id)
     ckptr = ocp.StandardCheckpointer()

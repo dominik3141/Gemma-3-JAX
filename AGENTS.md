@@ -1,5 +1,9 @@
 # AGENTS
 
+## Runtime
+
+- We always use `uv` in this repository. Don't use the OS python unless you have a good reason to.
+
 ## Commit policy
 
 - Agents must never create commits unless the user explicitly instructs them to commit.
