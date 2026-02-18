@@ -48,7 +48,6 @@ HOSTNAME = socket.gethostname()
 PID = os.getpid()
 LOGGER = logging.getLogger(__name__)
 
-
 def sample_with_temp(
     key: PRNGKeyArray,
     params: Params,
@@ -610,10 +609,12 @@ def train_loop(
     )
 
     # update parameters
-    grad_updates, new_optimizer_state = optax.adam(LEARNING_RATE).update(
+    grad_updates, new_optimizer_state = optax.contrib.muon(
+        learning_rate=LEARNING_RATE
+    ).update(
         accumulated_grads, optimizer_state, params
     )
-    new_params = jax.tree_util.tree_map(lambda p, u: p + u, params, grad_updates)
+    new_params = optax.apply_updates(params, grad_updates)
 
     return (
         new_params,

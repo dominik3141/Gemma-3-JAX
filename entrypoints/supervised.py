@@ -1,10 +1,11 @@
 from functools import partial
 
 import jax
+import optax
 from jax.experimental import mesh_utils
 from jax.sharding import Mesh, NamedSharding, PartitionSpec
 
-from core.supervised_train import train_loop
+from core.supervised_train import LEARNING_RATE, train_loop
 from utils.params_io_27b import DEFAULT_ORBAX_CHECKPOINT, load_params
 
 
@@ -30,9 +31,10 @@ def main(num_batches: int = 100):
     batch_size = num_devices * 2
     keys = jax.random.split(key, num_devices * num_batches)
 
-    params, losses = jax.lax.scan(
+    optimizer_state = optax.contrib.muon(learning_rate=LEARNING_RATE).init(params)
+    (params, _), losses = jax.lax.scan(
         partial(train_loop, data_sharding, batch_size),
-        params,
+        (params, optimizer_state),
         keys,
     )
 

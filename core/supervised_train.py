@@ -18,13 +18,15 @@ But for now we just always take sequences of the same length to avoid this probl
 
 import jax
 import jax.numpy as jnp
+import optax
 from beartype import beartype
 from jaxtyping import Array, Float, Int, PRNGKeyArray, jaxtyped
 from core.forward_parralel import forward_parralel
-import optax
 from core.forward_parralel import Params
 from utils.sft_data import get_training_sample
 from functools import partial
+
+LEARNING_RATE = 0.01
 
 
 def loss_fn(xs: Int[Array, "seq"], params: Params) -> Float[Array, ""]:
@@ -36,18 +38,14 @@ def loss_fn(xs: Int[Array, "seq"], params: Params) -> Float[Array, ""]:
     return jnp.mean(loss)
 
 
-def SGD(params: Params, grads: Params, lr: float) -> Params:
-    return jax.tree_util.tree_map(lambda param, grad: param - lr * grad, params, grads)
-
-
 def train(
     key: PRNGKeyArray,
     batch_size: int,
     params: Params,
     seq_length: int,
-    lr: float,
     data_sharding,
-) -> tuple[Params, Float[Array, ""]]:
+    optimizer_state: optax.OptState,
+) -> tuple[Params, Float[Array, ""], optax.OptState]:
     def loss_batched(xss: Int[Array, "batch seq"], params: Params) -> Float[Array, ""]:
         return jnp.mean(jax.vmap(loss_fn, in_axes=(0, None))(xss, params))
 
@@ -57,13 +55,28 @@ def train(
     train_data = jax.lax.with_sharding_constraint(train_data, data_sharding)
 
     loss, grads = jax.value_and_grad(loss_batched, argnums=1)(train_data, params)
-    return SGD(params, grads, lr), loss
+    updates, new_optimizer_state = optax.contrib.muon(learning_rate=LEARNING_RATE).update(
+        grads, optimizer_state, params
+    )
+    new_params = optax.apply_updates(params, updates)
+    return new_params, loss, new_optimizer_state
 
 
 @jaxtyped(typechecker=beartype)
 def train_loop(
-    data_sharding, batch_size: int, params: Params, key: PRNGKeyArray
-) -> tuple[Params, Float[Array, ""]]:
-    new_params, loss = train(key, batch_size, params, 1024, 0.01, data_sharding)
+    data_sharding,
+    batch_size: int,
+    carry: tuple[Params, optax.OptState],
+    key: PRNGKeyArray,
+) -> tuple[tuple[Params, optax.OptState], Float[Array, ""]]:
+    params, optimizer_state = carry
+    new_params, loss, new_optimizer_state = train(
+        key,
+        batch_size,
+        params,
+        1024,
+        data_sharding,
+        optimizer_state,
+    )
 
-    return new_params, loss
+    return (new_params, new_optimizer_state), loss

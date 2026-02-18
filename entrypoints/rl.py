@@ -36,7 +36,7 @@ def main() -> None:
     mesh = jax.sharding.Mesh(jax.devices(), axis_names=("model",))
     params = load_params(DEFAULT_ORBAX_CHECKPOINT, mesh)
 
-    optimizer_state = optax.adam(LEARNING_RATE).init(params)
+    optimizer_state = optax.contrib.muon(learning_rate=LEARNING_RATE).init(params)
     params_ref = params
     i = 0
 
