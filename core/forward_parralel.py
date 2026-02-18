@@ -2,6 +2,8 @@ r"""
 All comments that include concrete dimensionality numbers are written with the 1B version of Gemma in mind.
 """
 
+import functools
+
 import jax
 import jax.numpy as jnp
 from beartype import beartype
@@ -47,7 +49,9 @@ def group_attention(
     return xs
 
 
-@jax.jit  # the scan should already compile this, but better to be explicit
+@functools.partial(
+    jax.jit, donate_argnums=(0,)
+)  # the scan should already compile this, but better to be explicit
 @jax.checkpoint  # OOM problems without this
 def Block(
     xs: Float[Array, "seq d_model"],

@@ -582,7 +582,7 @@ def train_inner_loop(
     )
 
 
-@jax.jit
+@functools.partial(jax.jit, donate_argnums=(3,))
 @jaxtyped(typechecker=beartype)
 def train_loop(
     key: PRNGKeyArray,

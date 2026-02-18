@@ -15,6 +15,8 @@ to accept a lot of conditional branching, which might make our code less efficie
 isn't something I would consider good style).
 """
 
+import functools
+
 import jax
 import jax.numpy as jnp
 from beartype import beartype
@@ -97,7 +99,7 @@ def Block_KV_cached(
     return (x, pos), (Ks, Vs)
 
 
-@jax.jit
+@functools.partial(jax.jit, donate_argnums=(3, 4))
 @jaxtyped(typechecker=beartype)
 def forward_single(
     x: int | Int[Array, ""],
@@ -181,6 +183,7 @@ def allocate_kv_cache(
     return ks_cached, vs_cached
 
 
+@functools.partial(jax.jit, donate_argnums=(3, 4))
 def prefill(
     params: Params,
     tokens: Int[Array, "prompt_len"],
@@ -234,6 +237,7 @@ def prefill(
     return last_real_logits, ks_cached, vs_cached
 
 
+@functools.partial(jax.jit, static_argnums=(5,), donate_argnums=(3, 4))
 def decode(
     params: Params,
     logits: Float[Array, "vocab"],
@@ -246,9 +250,6 @@ def decode(
     Float[Array, "layer seq_len kv_head head_dim"],
     Float[Array, "layer seq_len kv_head value_dim"],
 ]:
-    if max_new_tokens <= 0:
-        raise ValueError("max_new_tokens must be > 0")
-
     curr_pos = jnp.asarray(curr_pos, dtype=jnp.int32)
 
     def decode_step(

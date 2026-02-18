@@ -214,7 +214,7 @@ def main() -> None:
         prefill_batch = jax.vmap(
             prefill, in_axes=(None, 0, 0, 1, 1), out_axes=(0, 1, 1)
         )
-        prefill_jit = jax.jit(prefill_batch)
+        prefill_jit = jax.jit(prefill_batch, donate_argnums=(3, 4))
         prefill_compile_start = time.perf_counter()
         compiled_prefill = prefill_jit.lower(
             params,
@@ -242,7 +242,11 @@ def main() -> None:
         decode_batch = jax.vmap(
             decode, in_axes=(None, 0, 0, 1, 1, None), out_axes=(1, 1, 1)
         )
-        decode_jit = jax.jit(decode_batch, static_argnums=(5,))
+        decode_jit = jax.jit(
+            decode_batch,
+            static_argnums=(5,),
+            donate_argnums=(3, 4),
+        )
         decode_compile_start = time.perf_counter()
         compiled_decode = decode_jit.lower(
             params,
