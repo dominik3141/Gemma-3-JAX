@@ -20,9 +20,9 @@ import jax
 import jax.numpy as jnp
 from beartype import beartype
 from jaxtyping import Array, Float, Int, PRNGKeyArray, jaxtyped
-from core.gemma_forward_parralel import forward_parralel
+from core.forward_parralel import forward_parralel
 import optax
-from core.gemma_forward_parralel import Params
+from core.forward_parralel import Params
 from utils.sft_data import get_training_sample
 from functools import partial
 

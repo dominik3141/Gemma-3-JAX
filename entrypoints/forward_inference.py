@@ -10,7 +10,7 @@ import jax.numpy as jnp
 import numpy as np
 from jaxtyping import Array, Int
 
-from core.gemma_forward_inference import decode, prefill
+from core.forward_inference import decode, prefill
 from utils.params_io_27b import DEFAULT_ORBAX_CHECKPOINT, load_params
 from utils.profiling import build_shared_profile_options
 from utils.tokenize_text import detokenize_ids, tokenize_text

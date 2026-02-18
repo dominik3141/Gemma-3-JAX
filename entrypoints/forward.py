@@ -1,6 +1,6 @@
 import jax.numpy as jnp
 
-from core.gemma_forward_parralel import forward_parralel
+from core.forward_parralel import forward_parralel
 from utils.params_io_1b import DEFAULT_ORBAX_CHECKPOINT, load_params
 
 

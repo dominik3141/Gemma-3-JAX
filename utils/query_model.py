@@ -13,8 +13,8 @@ import time
 import jax
 import jax.numpy as jnp
 
-from core.gemma_forward_parralel import config
-from core.gemma_forward_inference import forward_single
+from core.forward_parralel import config
+from core.forward_inference import forward_single
 from utils.params_io import DEFAULT_ORBAX_CHECKPOINT, load_params
 from utils.tokenize_text import detokenize_ids, tokenize_text
 

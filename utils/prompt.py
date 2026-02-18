@@ -4,7 +4,7 @@ import jax
 import jax.numpy as jnp
 import sentencepiece as spm
 from jaxtyping import Array, Float, PRNGKeyArray
-from core.gemma_forward_parralel import Params, forward_parralel
+from core.forward_parralel import Params, forward_parralel
 from utils.params_io import DEFAULT_ORBAX_CHECKPOINT, load_params
 
 # Load tokenizer

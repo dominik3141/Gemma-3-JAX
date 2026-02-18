@@ -19,7 +19,7 @@ import jax
 import jax.numpy as jnp
 from beartype import beartype
 from jaxtyping import Array, Bool, Float, Int, jaxtyped
-from core.gemma_forward_common import (
+from core.forward_common import (
     Params,
     RMSNorm,
     _model_prefix,

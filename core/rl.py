@@ -37,8 +37,8 @@ import jax.numpy as jnp
 import optax
 from beartype import beartype
 from jaxtyping import Array, Float, Int, PRNGKeyArray, jaxtyped
-from core.gemma_forward_parralel import Params, forward_parralel
-from core.gemma_forward_inference import forward_single, prefill
+from core.forward_parralel import Params, forward_parralel
+from core.forward_inference import forward_single, prefill
 from utils.gcp import log_text_async
 from utils.tokenize_text import tokenize_text, detokenize_ids
 import utils.wandb_logging as wandb_logging
