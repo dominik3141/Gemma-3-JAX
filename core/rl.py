@@ -38,7 +38,7 @@ import optax
 from beartype import beartype
 from jaxtyping import Array, Float, Int, PRNGKeyArray, jaxtyped
 from core.forward_parralel import Params, forward_parralel
-from core.forward_inference import forward_single, prefill
+from core.forward_inference import allocate_kv_cache, forward_single, prefill
 from utils.gcp import log_text_async
 from utils.tokenize_text import tokenize_text, detokenize_ids
 import utils.wandb_logging as wandb_logging
@@ -48,13 +48,14 @@ HOSTNAME = socket.gethostname()
 PID = os.getpid()
 LOGGER = logging.getLogger(__name__)
 
+
 def sample_with_temp(
     key: PRNGKeyArray,
     params: Params,
     final_prompt_token: int | Int[Array, ""],
     pos: int,  # position of the last prompt token <=> length of prompt
-    K_cache: Float[Array, "layer cache_pos kv_head head_dim"],
-    V_cache: Float[Array, "layer cache_pos kv_head value_dim"],
+    K_cache: Float[Array, "layer seq_len kv_head head_dim"],
+    V_cache: Float[Array, "layer seq_len kv_head value_dim"],
     temperature: float,
     sample_length: int,
 ) -> tuple[Int[Array, "traj_len"], Float[Array, "traj_len"]]:
@@ -511,18 +512,16 @@ def get_group(
 
     # calculate the KV cache of the prompt
     prompt_len = prompt.shape[0]
-    prompt_tokens = prompt[None, :]
-    prompt_lengths = jnp.array([prompt_len], dtype=jnp.int32)
-    prompt_last_tokens = jnp.array([prompt[-1]], dtype=jnp.int32)
-    _, K_cache_batched, V_cache_batched = prefill(
-        params,
-        prompt_tokens,
-        prompt_lengths,
-        prompt_last_tokens,
-        MAX_RESPONSE_LENGTH,
-    )
+    K_cache_batched, V_cache_batched = allocate_kv_cache(1, MAX_RESPONSE_LENGTH)
     K_cache = K_cache_batched[:, 0, :, :, :]
     V_cache = V_cache_batched[:, 0, :, :, :]
+    _, K_cache, V_cache = prefill(
+        params,
+        prompt,
+        prompt_len,
+        K_cache,
+        V_cache,
+    )
 
     all_keys = jax.random.split(key, group_size + 1)
     key, group_keys = all_keys[0], all_keys[1:]
@@ -611,9 +610,7 @@ def train_loop(
     # update parameters
     grad_updates, new_optimizer_state = optax.contrib.muon(
         learning_rate=LEARNING_RATE
-    ).update(
-        accumulated_grads, optimizer_state, params
-    )
+    ).update(accumulated_grads, optimizer_state, params)
     new_params = optax.apply_updates(params, grad_updates)
 
     return (

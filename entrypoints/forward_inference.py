@@ -10,7 +10,7 @@ import jax.numpy as jnp
 import numpy as np
 from jaxtyping import Array, Int
 
-from core.forward_inference import decode, prefill
+from core.forward_inference import allocate_kv_cache, decode, prefill
 from utils.params_io_27b import DEFAULT_ORBAX_CHECKPOINT, load_params
 from utils.profiling import build_shared_profile_options
 from utils.tokenize_text import detokenize_ids, tokenize_text
@@ -31,7 +31,6 @@ class PromptBatch:
     prompt_lengths: list[int]
     prompt_lengths_array: Int[Array, "batch"]
     tokens_padded: Int[Array, "batch prompt_len"]
-    last_prompt_tokens: Int[Array, "batch"]
     batch_size: int
     max_prompt_tokens: int
 
@@ -69,9 +68,6 @@ def build_prompt_batch(prompts: list[str]) -> PromptBatch:
         tokens_padded_np[idx, : len(tokens)] = tokens
     tokens_padded = jnp.asarray(tokens_padded_np, dtype=jnp.int32)
     prompt_lengths_array = jnp.asarray(prompt_lengths, dtype=jnp.int32)
-    last_prompt_tokens = tokens_padded[
-        jnp.arange(batch_size, dtype=jnp.int32), prompt_lengths_array - 1
-    ]
 
     return PromptBatch(
         prompts=prompts,
@@ -79,7 +75,6 @@ def build_prompt_batch(prompts: list[str]) -> PromptBatch:
         prompt_lengths=prompt_lengths,
         prompt_lengths_array=prompt_lengths_array,
         tokens_padded=tokens_padded,
-        last_prompt_tokens=last_prompt_tokens,
         batch_size=batch_size,
         max_prompt_tokens=max_prompt_tokens,
     )
@@ -213,16 +208,20 @@ def main() -> None:
 
         prompt_batch = build_prompt_batch(get_prompts())
         kv_cache_len = prompt_batch.max_prompt_tokens + max_new_tokens + 1
+        ks_cached, vs_cached = allocate_kv_cache(prompt_batch.batch_size, kv_cache_len)
 
         print("Compiling prefill...")
-        prefill_jit = jax.jit(prefill, static_argnums=(4,))
+        prefill_batch = jax.vmap(
+            prefill, in_axes=(None, 0, 0, 1, 1), out_axes=(0, 1, 1)
+        )
+        prefill_jit = jax.jit(prefill_batch)
         prefill_compile_start = time.perf_counter()
         compiled_prefill = prefill_jit.lower(
             params,
             prompt_batch.tokens_padded,
             prompt_batch.prompt_lengths_array,
-            prompt_batch.last_prompt_tokens,
-            kv_cache_len,
+            ks_cached,
+            vs_cached,
         ).compile()
         prefill_compile_elapsed = time.perf_counter() - prefill_compile_start
         print(f"Prefill JIT compilation time: {prefill_compile_elapsed:.3f}s")
@@ -233,13 +232,17 @@ def main() -> None:
             params,
             prompt_batch.tokens_padded,
             prompt_batch.prompt_lengths_array,
-            prompt_batch.last_prompt_tokens,
+            ks_cached,
+            vs_cached,
         )
         logits.block_until_ready()
         prefill_elapsed = time.perf_counter() - prefill_start
 
         print("Compiling decode...")
-        decode_jit = jax.jit(decode, static_argnums=(5,))
+        decode_batch = jax.vmap(
+            decode, in_axes=(None, 0, 0, 1, 1, None), out_axes=1
+        )
+        decode_jit = jax.jit(decode_batch, static_argnums=(5,))
         decode_compile_start = time.perf_counter()
         compiled_decode = decode_jit.lower(
             params,

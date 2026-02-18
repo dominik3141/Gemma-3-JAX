@@ -15,6 +15,7 @@
 - Avoid adding flags/options "just in case" if they are unlikely to be used.
 - For recurring ops workflows, hardcode practical project defaults instead of requiring repeated manual args.
 - When the user asks to "set it up", execute the infra/app setup directly and verify it works end-to-end.
+- Keep functions single-sequence when possible and apply batching at call sites via `jax.vmap`. In this repository, we use `vmap` whenever possible.
 - Prefer `jaxtyping` annotations for JAX-heavy function signatures when practical.
 - Do not use type aliases in function signatures; keep signatures explicit so they are readable at first sight.
 

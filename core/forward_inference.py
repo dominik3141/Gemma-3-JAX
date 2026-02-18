@@ -33,8 +33,8 @@ from core.forward_common import (
 
 
 def group_attention_single(
-    Ks: Float[Array, "cache_pos head_dim"],
-    Vs: Float[Array, "cache_pos value_dim"],
+    Ks: Float[Array, "seq_len head_dim"],
+    Vs: Float[Array, "seq_len value_dim"],
     Qss: Float[Array, "q_per_group head_dim"],
     pos: int | Int[Array, ""],
     is_local_attn: bool | Bool[Array, ""],
@@ -56,14 +56,14 @@ def Block_KV_cached(
     scans: tuple[
         Params,
         bool | Bool[Array, ""],
-        Float[Array, "cache_pos kv_head head_dim"],
-        Float[Array, "cache_pos kv_head value_dim"],
+        Float[Array, "seq_len kv_head head_dim"],
+        Float[Array, "seq_len kv_head value_dim"],
     ],
 ) -> tuple[
     tuple[Float[Array, "d_model"], Int[Array, ""]],
     tuple[
-        Float[Array, "cache_pos kv_head head_dim"],
-        Float[Array, "cache_pos kv_head value_dim"],
+        Float[Array, "seq_len kv_head head_dim"],
+        Float[Array, "seq_len kv_head value_dim"],
     ],
 ]:
     """
@@ -103,12 +103,12 @@ def forward_single(
     x: int | Int[Array, ""],
     params: Params,
     pos: int | Int[Array, ""],
-    Ks_cached: Float[Array, "layer cache_pos kv_head head_dim"],
-    Vs_cached: Float[Array, "layer cache_pos kv_head value_dim"],
+    Ks_cached: Float[Array, "layer seq_len kv_head head_dim"],
+    Vs_cached: Float[Array, "layer seq_len kv_head value_dim"],
 ) -> tuple[
     Float[Array, "vocab"],
-    Float[Array, "layer cache_pos kv_head head_dim"],
-    Float[Array, "layer cache_pos kv_head value_dim"],
+    Float[Array, "layer seq_len kv_head head_dim"],
+    Float[Array, "layer seq_len kv_head value_dim"],
 ]:
     """
     Predict the next token given only a single token together with the K,V vectors
@@ -152,10 +152,11 @@ def forward_single(
 
 
 def allocate_kv_cache(
-    batch_size: int, kv_cache_len: int
+    batch_size: int,
+    kv_cache_len: int,
 ) -> tuple[
-    Float[Array, "layer batch cache_pos kv_head head_dim"],
-    Float[Array, "layer batch cache_pos kv_head value_dim"],
+    Float[Array, "layer batch seq_len kv_head head_dim"],
+    Float[Array, "layer batch seq_len kv_head value_dim"],
 ]:
     ks_cached = jnp.zeros(
         (
@@ -182,38 +183,48 @@ def allocate_kv_cache(
 
 def prefill(
     params: Params,
-    prompt_tokens: Int[Array, "batch prompt_len"],
-    prompt_lengths: Int[Array, "batch"],
-    prompt_last_tokens: Int[Array, "batch"],
-    kv_cache_len: int,
+    tokens: Int[Array, "prompt_len"],
+    seq_length: int | Int[Array, ""],
+    ks_cached: Float[Array, "layer seq_len kv_head head_dim"],
+    vs_cached: Float[Array, "layer seq_len kv_head value_dim"],
 ) -> tuple[
-    Float[Array, "batch vocab"],
-    Float[Array, "layer batch kv_cache_len kv_head head_dim"],
-    Float[Array, "layer batch kv_cache_len kv_head value_dim"],
+    Float[Array, "vocab"],
+    Float[Array, "layer seq_len kv_head head_dim"],
+    Float[Array, "layer seq_len kv_head value_dim"],
 ]:
-    # One fixed-size KV cache per prompt in the batch.
-    ks_cached, vs_cached = allocate_kv_cache(prompt_tokens.shape[0], kv_cache_len)
-    # Single-token forward, vectorized over batch.
-    forward_batch = jax.vmap(
-        forward_single, in_axes=(0, None, 0, 1, 1), out_axes=(0, 1, 1)
+    seq_length = jnp.asarray(seq_length, dtype=jnp.int32)
+
+    logits, ks_cached, vs_cached = forward_single(
+        tokens[0], params, jnp.array(0, dtype=jnp.int32), ks_cached, vs_cached
     )
 
-    # Bootstrap with token 0 at position 0 for every prompt.
-    pos0 = jnp.zeros((prompt_tokens.shape[0],), dtype=jnp.int32)
-    logits, ks_cached, vs_cached = forward_batch(
-        prompt_tokens[:, 0], params, pos0, ks_cached, vs_cached
-    )
+    for t in range(1, tokens.shape[0]):
 
-    for t in range(1, prompt_tokens.shape[1]):
-        is_active = t < prompt_lengths
-        # Finished prompts stay pinned to their last real token/position so
-        # shorter prompts do not advance cache positions past prompt end.
-        pos = jnp.where(is_active, t, prompt_lengths - 1).astype(jnp.int32)
-        token_ids = jnp.where(
-            is_active, prompt_tokens[:, t], prompt_last_tokens
-        ).astype(jnp.int32)
-        logits, ks_cached, vs_cached = forward_batch(
-            token_ids, params, pos, ks_cached, vs_cached
+        def do_prefill_step(
+            state: tuple[
+                Float[Array, "vocab"],
+                Float[Array, "layer seq_len kv_head head_dim"],
+                Float[Array, "layer seq_len kv_head value_dim"],
+            ],
+        ) -> tuple[
+            Float[Array, "vocab"],
+            Float[Array, "layer seq_len kv_head head_dim"],
+            Float[Array, "layer seq_len kv_head value_dim"],
+        ]:
+            _, ks_curr, vs_curr = state
+            return forward_single(
+                tokens[t],
+                params,
+                jnp.array(t, dtype=jnp.int32),
+                ks_curr,
+                vs_curr,
+            )
+
+        logits, ks_cached, vs_cached = jax.lax.cond(
+            t < seq_length,
+            do_prefill_step,
+            lambda state: state,
+            (logits, ks_cached, vs_cached),
         )
 
     return logits, ks_cached, vs_cached
@@ -221,29 +232,27 @@ def prefill(
 
 def decode(
     params: Params,
-    logits: Float[Array, "batch vocab"],
-    curr_pos: Int[Array, "batch"],
-    ks_cached: Float[Array, "layer batch cache_pos kv_head head_dim"],
-    vs_cached: Float[Array, "layer batch cache_pos kv_head value_dim"],
+    logits: Float[Array, "vocab"],
+    curr_pos: int | Int[Array, ""],
+    ks_cached: Float[Array, "layer seq_len kv_head head_dim"],
+    vs_cached: Float[Array, "layer seq_len kv_head value_dim"],
     max_new_tokens: int,
-) -> Int[Array, "decode_len batch"]:
-    forward_batch = jax.vmap(
-        forward_single, in_axes=(0, None, 0, 1, 1), out_axes=(0, 1, 1)
-    )
+) -> Int[Array, "decode_len"]:
+    curr_pos = jnp.asarray(curr_pos, dtype=jnp.int32)
 
     generated_tokens = []
 
     for _ in range(max_new_tokens):
-        next_tokens = jnp.argmax(logits, axis=-1).astype(jnp.int32)
-        generated_tokens.append(next_tokens)
-        logits, ks_cached, vs_cached = forward_batch(
-            next_tokens, params, curr_pos, ks_cached, vs_cached
+        next_token = jnp.argmax(logits, axis=-1).astype(jnp.int32)
+        generated_tokens.append(next_token)
+        logits, ks_cached, vs_cached = forward_single(
+            next_token, params, curr_pos, ks_cached, vs_cached
         )
         curr_pos = curr_pos + 1
 
     if generated_tokens:
         generated_tokens_array = jnp.stack(generated_tokens, axis=0)
     else:
-        generated_tokens_array = jnp.zeros((0, logits.shape[0]), dtype=jnp.int32)
+        generated_tokens_array = jnp.zeros((0,), dtype=jnp.int32)
 
     return generated_tokens_array
