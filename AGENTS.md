@@ -18,6 +18,7 @@
 - Keep functions single-sequence when possible and apply batching at call sites via `jax.vmap`. In this repository, we use `vmap` whenever possible.
 - Prefer `jaxtyping` annotations for JAX-heavy function signatures when practical.
 - Do not use type aliases in function signatures; keep signatures explicit so they are readable at first sight.
+- Prefer fail-fast behavior over defensive fallbacks when invalid inputs indicate a caller bug. Do not silently clamp, coerce, or return placeholder outputs just to avoid errors unless explicitly requested.
 
 ## Agent memory hygiene
 

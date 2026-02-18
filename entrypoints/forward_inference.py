@@ -240,7 +240,7 @@ def main() -> None:
 
         print("Compiling decode...")
         decode_batch = jax.vmap(
-            decode, in_axes=(None, 0, 0, 1, 1, None), out_axes=1
+            decode, in_axes=(None, 0, 0, 1, 1, None), out_axes=(1, 1, 1)
         )
         decode_jit = jax.jit(decode_batch, static_argnums=(5,))
         decode_compile_start = time.perf_counter()
@@ -258,7 +258,7 @@ def main() -> None:
         print("Prompts processed.")
         print("Generating batched completions...")
         generation_start = time.perf_counter()
-        generated_tokens_array = compiled_decode(
+        generated_tokens_array, ks_cached, vs_cached = compiled_decode(
             params,
             logits,
             prompt_batch.prompt_lengths_array,

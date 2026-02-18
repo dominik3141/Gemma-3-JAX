@@ -241,22 +241,49 @@ def decode(
     ks_cached: Float[Array, "layer seq_len kv_head head_dim"],
     vs_cached: Float[Array, "layer seq_len kv_head value_dim"],
     max_new_tokens: int,
-) -> Int[Array, "decode_len"]:
+) -> tuple[
+    Int[Array, "decode_len"],
+    Float[Array, "layer seq_len kv_head head_dim"],
+    Float[Array, "layer seq_len kv_head value_dim"],
+]:
+    if max_new_tokens <= 0:
+        raise ValueError("max_new_tokens must be > 0")
+
     curr_pos = jnp.asarray(curr_pos, dtype=jnp.int32)
 
-    generated_tokens = []
-
-    for _ in range(max_new_tokens):
-        next_token = jnp.argmax(logits, axis=-1).astype(jnp.int32)
-        generated_tokens.append(next_token)
-        logits, ks_cached, vs_cached = forward_single(
-            next_token, params, curr_pos, ks_cached, vs_cached
+    def decode_step(
+        carry: tuple[
+            Float[Array, "vocab"],
+            Int[Array, ""],
+            Float[Array, "layer seq_len kv_head head_dim"],
+            Float[Array, "layer seq_len kv_head value_dim"],
+        ],
+        _: None,
+    ) -> tuple[
+        tuple[
+            Float[Array, "vocab"],
+            Int[Array, ""],
+            Float[Array, "layer seq_len kv_head head_dim"],
+            Float[Array, "layer seq_len kv_head value_dim"],
+        ],
+        Int[Array, ""],
+    ]:
+        logits_curr, pos_curr, ks_curr, vs_curr = carry
+        next_token = jnp.argmax(logits_curr, axis=-1).astype(jnp.int32)
+        logits_next, ks_next, vs_next = forward_single(
+            next_token,
+            params,
+            pos_curr,
+            ks_curr,
+            vs_curr,
         )
-        curr_pos = curr_pos + 1
+        return (logits_next, pos_curr + 1, ks_next, vs_next), next_token
 
-    if generated_tokens:
-        generated_tokens_array = jnp.stack(generated_tokens, axis=0)
-    else:
-        generated_tokens_array = jnp.zeros((0,), dtype=jnp.int32)
+    (_, _, ks_cached, vs_cached), generated_tokens = jax.lax.scan(
+        decode_step,
+        (logits, curr_pos, ks_cached, vs_cached),
+        xs=None,
+        length=max_new_tokens,
+    )
 
-    return generated_tokens_array
+    return generated_tokens, ks_cached, vs_cached
