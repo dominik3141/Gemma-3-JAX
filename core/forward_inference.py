@@ -192,42 +192,46 @@ def prefill(
     Float[Array, "layer seq_len kv_head head_dim"],
     Float[Array, "layer seq_len kv_head value_dim"],
 ]:
-    seq_length = jnp.asarray(seq_length, dtype=jnp.int32)
-
     logits, ks_cached, vs_cached = forward_single(
         tokens[0], params, jnp.array(0, dtype=jnp.int32), ks_cached, vs_cached
     )
+    last_real_logits = logits
 
-    for t in range(1, tokens.shape[0]):
-
-        def do_prefill_step(
-            state: tuple[
-                Float[Array, "vocab"],
-                Float[Array, "layer seq_len kv_head head_dim"],
-                Float[Array, "layer seq_len kv_head value_dim"],
-            ],
-        ) -> tuple[
+    def prefill_step(
+        carry: tuple[
             Float[Array, "vocab"],
             Float[Array, "layer seq_len kv_head head_dim"],
             Float[Array, "layer seq_len kv_head value_dim"],
-        ]:
-            _, ks_curr, vs_curr = state
-            return forward_single(
-                tokens[t],
-                params,
-                jnp.array(t, dtype=jnp.int32),
-                ks_curr,
-                vs_curr,
-            )
-
-        logits, ks_cached, vs_cached = jax.lax.cond(
-            t < seq_length,
-            do_prefill_step,
-            lambda state: state,
-            (logits, ks_cached, vs_cached),
+            Float[Array, "vocab"],
+        ],
+        t: Int[Array, ""],
+    ) -> tuple[
+        tuple[
+            Float[Array, "vocab"],
+            Float[Array, "layer seq_len kv_head head_dim"],
+            Float[Array, "layer seq_len kv_head value_dim"],
+            Float[Array, "vocab"],
+        ],
+        None,
+    ]:
+        _, ks_curr, vs_curr, last_logits_curr = carry
+        logits_curr, ks_next, vs_next = forward_single(
+            tokens[t],
+            params,
+            t,
+            ks_curr,
+            vs_curr,
         )
+        last_logits_next = jnp.where(t < seq_length, logits_curr, last_logits_curr)
+        return (logits_curr, ks_next, vs_next, last_logits_next), None
 
-    return logits, ks_cached, vs_cached
+    (_, ks_cached, vs_cached, last_real_logits), _ = jax.lax.scan(
+        prefill_step,
+        (logits, ks_cached, vs_cached, last_real_logits),
+        jnp.arange(1, tokens.shape[0], dtype=jnp.int32),
+    )
+
+    return last_real_logits, ks_cached, vs_cached
 
 
 def decode(
