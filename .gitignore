@@ -34,3 +34,7 @@ dev_sync.tar.gz.env
 jax-trace/
 
 HLO_dumps/
+.benchmarks
+.pytest_cache
+.ruff_cache
+.uv-cache
