@@ -258,6 +258,7 @@ def decode(
     temperature: float,
 ) -> tuple[
     Int[Array, "decode_len"],
+    Float[Array, "decode_len"],
     Float[Array, "layer seq_len kv_head head_dim"],
     Float[Array, "layer seq_len kv_head value_dim"],
 ]:
@@ -279,7 +280,7 @@ def decode(
             Float[Array, "layer seq_len kv_head head_dim"],
             Float[Array, "layer seq_len kv_head value_dim"],
         ],
-        Int[Array, ""],
+        tuple[Int[Array, ""], Float[Array, ""]],
     ]:
         logits_curr, pos_curr, ks_curr, vs_curr = carry
         gumbel_noise = jax.random.gumbel(
@@ -288,6 +289,16 @@ def decode(
         next_token = jnp.argmax(logits_curr + temperature * gumbel_noise).astype(
             jnp.int32
         )
+
+        # Easy mistake: temperature=0 is a valid greedy decode mode for sampling, but
+        # log-probs of softmax(logits / temperature) are undefined at temperature=0.
+        # Convention here: when temperature==0, report log-probs under unscaled logits
+        # (equivalent to temperature=1). Callers must treat this as a convention and not
+        # as the same policy semantics as non-zero-temperature sampling log-probs.
+        log_prob_temperature = jnp.where(temperature == 0.0, 1.0, temperature)
+        log_probs_curr = jax.nn.log_softmax(logits_curr / log_prob_temperature)
+        next_token_log_prob = log_probs_curr[next_token]
+
         logits_next, ks_next, vs_next = forward_single(
             next_token,
             params,
@@ -295,12 +306,15 @@ def decode(
             ks_curr,
             vs_curr,
         )
-        return (logits_next, pos_curr + 1, ks_next, vs_next), next_token
+        return (logits_next, pos_curr + 1, ks_next, vs_next), (
+            next_token,
+            next_token_log_prob,
+        )
 
-    (_, _, ks_cached, vs_cached), generated_tokens = jax.lax.scan(
+    (_, _, ks_cached, vs_cached), (generated_tokens, generated_log_probs) = jax.lax.scan(
         decode_step,
         (logits, curr_pos, ks_cached, vs_cached),
         sample_keys,
     )
 
-    return generated_tokens, ks_cached, vs_cached
+    return generated_tokens, generated_log_probs, ks_cached, vs_cached

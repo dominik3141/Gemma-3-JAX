@@ -38,7 +38,7 @@ import optax
 from beartype import beartype
 from jaxtyping import Array, Float, Int, PRNGKeyArray, jaxtyped
 from core.forward_parralel import Params, forward_parralel
-from core.forward_inference import allocate_kv_cache, forward_single, prefill
+from core.forward_inference import allocate_kv_cache, decode, prefill
 from utils.gcp import log_text_async
 from utils.tokenize_text import tokenize_text, detokenize_ids
 import utils.wandb_logging as wandb_logging
@@ -47,50 +47,6 @@ import functools
 HOSTNAME = socket.gethostname()
 PID = os.getpid()
 LOGGER = logging.getLogger(__name__)
-
-
-def sample_with_temp(
-    key: PRNGKeyArray,
-    params: Params,
-    final_prompt_token: int | Int[Array, ""],
-    pos: int,  # position of the last prompt token <=> length of prompt
-    K_cache: Float[Array, "layer seq_len kv_head head_dim"],
-    V_cache: Float[Array, "layer seq_len kv_head value_dim"],
-    temperature: float,
-    sample_length: int,
-) -> tuple[Int[Array, "traj_len"], Float[Array, "traj_len"]]:
-    """
-    Sample according to a given temperature for a fixed length.
-    We return both the autoregressively completed sequence and the probability of the trajectory at
-    sampling time.
-
-    For efficiency, this function already takes the K,V cache of the prompt and only the last prompt token.
-    This way we can calculate the KV of the prompt only once and reuse this for every group element.
-    """
-
-    def sample_loop(carry, scans):
-        x, K_cache, V_cache = carry
-        pos, key = scans
-
-        logits, K_cache, V_cache = forward_single(x, params, pos, K_cache, V_cache)
-
-        # sample next token
-        scaled_logits = logits / jnp.maximum(
-            temperature, 1e-8
-        )  # to support temperature=0
-        x = jax.random.categorical(key, scaled_logits)
-        log_prop_of_next_token = jax.nn.log_softmax(scaled_logits)[x]
-
-        return (x, K_cache, V_cache), (x, log_prop_of_next_token)
-
-    poss = jnp.arange(sample_length) + pos  # [pos+0, pos+1,...,pos+same_length]
-    keys = jax.random.split(key, sample_length)
-    _, (xs, log_probs) = jax.lax.scan(
-        sample_loop, (final_prompt_token, K_cache, V_cache), (poss, keys)
-    )
-
-    return xs, log_probs
-
 
 def get_prompt(n: int | Int[Array, ""]) -> Int[Array, "prompt_len"]:
     r"""
@@ -518,7 +474,7 @@ def get_group(
 
     # Prefill once because every group element shares the same prompt,
     # then replicate that prompt KV state across the full group batch.
-    _, K_cache_prefilled, V_cache_prefilled = prefill(
+    prompt_logits, K_cache_prefilled, V_cache_prefilled = prefill(
         params,
         prompt,
         prompt_len,
@@ -532,20 +488,23 @@ def get_group(
         V_cache_prefilled[:, None, :, :, :], V_cache_batched.shape
     )
 
-    all_keys = jax.random.split(key, group_size + 1)
-    key, group_keys = all_keys[0], all_keys[1:]
-    responses, log_probs = jax.vmap(
-        sample_with_temp,
-        in_axes=(0, None, None, None, 1, 1, None, None),
+    prompt_logits_group = jnp.broadcast_to(
+        prompt_logits[None, :], (group_size, prompt_logits.shape[0])
+    )
+    group_keys = jax.random.split(key, group_size)
+    responses, log_probs, _, _ = jax.vmap(
+        decode,
+        in_axes=(None, 0, 0, None, 1, 1, None, None),
+        out_axes=(0, 0, 1, 1),
     )(
-        group_keys,
         params,
-        prompt[-1],
-        prompt_len - 1,
+        group_keys,
+        prompt_logits_group,
+        prompt_len,
         K_cache_group,
         V_cache_group,
-        SAMPLE_TEMP,
         MAX_RESPONSE_LENGTH - prompt_len,
+        SAMPLE_TEMP,
     )
 
     return (
