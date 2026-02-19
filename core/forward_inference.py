@@ -54,27 +54,29 @@ def group_attention_single(
 
 
 def Block_KV_cached(
-    inits: tuple[Float[Array, "d_model"], Int[Array, ""]],
-    scans: tuple[
-        Params,
-        bool | Bool[Array, ""],
-        Float[Array, "seq_len kv_head head_dim"],
-        Float[Array, "seq_len kv_head value_dim"],
+    carry: tuple[
+        Float[Array, "d_model"],
+        Int[Array, ""],
+        Float[Array, "layer seq_len kv_head head_dim"],
+        Float[Array, "layer seq_len kv_head value_dim"],
     ],
+    scans: tuple[Params, bool | Bool[Array, ""], Int[Array, ""]],
 ) -> tuple[
-    tuple[Float[Array, "d_model"], Int[Array, ""]],
     tuple[
-        Float[Array, "seq_len kv_head head_dim"],
-        Float[Array, "seq_len kv_head value_dim"],
+        Float[Array, "d_model"],
+        Int[Array, ""],
+        Float[Array, "layer seq_len kv_head head_dim"],
+        Float[Array, "layer seq_len kv_head value_dim"],
     ],
+    None,
 ]:
     """
     Gemma block for a single token. Communication with other tokens via KV cache.
     """
-    x, pos = (
-        inits  # should the position really be carried? Optimally would be a closure?
-    )
-    block_params, is_local_attn, Ks_cached, Vs_cached = scans
+    x, pos, Ks_all_layers, Vs_all_layers = carry
+    block_params, is_local_attn, layer_idx = scans
+    Ks_cached = Ks_all_layers[layer_idx]
+    Vs_cached = Vs_all_layers[layer_idx]
 
     # make a copy of x to keep the residual
     x_og = x
@@ -84,19 +86,22 @@ def Block_KV_cached(
     K_new, V_new, Qs = calc_qkv(x, block_params, pos, is_local_attn)
 
     # Update fixed-size KV cache
-    Ks = Ks_cached.at[pos].set(K_new)
-    Vs = Vs_cached.at[pos].set(V_new)
+    Ks_updated = Ks_cached.at[pos].set(K_new)
+    Vs_updated = Vs_cached.at[pos].set(V_new)
 
     # COMMUNICATION WITH OTHER TOKENS
     x = jax.vmap(
         group_attention_single,
         in_axes=(1, 1, 0, None, None),
-    )(Ks, Vs, Qs, pos, is_local_attn)
+    )(Ks_updated, Vs_updated, Qs, pos, is_local_attn)
     x = jnp.reshape(x, (config.num_attention_heads * config.d_kvq,))  # concat heads
 
     x = postAttn(x, x_og, block_params)
 
-    return (x, pos), (Ks, Vs)
+    Ks_all_layers = Ks_all_layers.at[layer_idx].set(Ks_updated)
+    Vs_all_layers = Vs_all_layers.at[layer_idx].set(Vs_updated)
+
+    return (x, pos, Ks_all_layers, Vs_all_layers), None
 
 
 @functools.partial(jax.jit, donate_argnums=(3, 4))
@@ -133,14 +138,14 @@ def forward_single(
     # BLOCKS
     # Local/global attention pattern for Gemma 3
     is_local_attn = get_gemma3_layer_types(config.num_layers)
-    (x, _), (Ks_cached, Vs_cached) = jax.lax.scan(
+    layer_indices = jnp.arange(config.num_layers, dtype=jnp.int32)
+    (x, _, Ks_cached, Vs_cached), _ = jax.lax.scan(
         Block_KV_cached,
-        (x, pos),
+        (x, pos, Ks_cached, Vs_cached),
         (
             extract_block_params(params, model_prefix),
             is_local_attn,
-            Ks_cached,
-            Vs_cached,
+            layer_indices,
         ),
     )
 
