@@ -72,6 +72,13 @@ def Block_KV_cached(
 ]:
     """
     Gemma block for a single token. Communication with other tokens via KV cache.
+
+    One might wonder why we have the KV cache as a carry instead of scanning over it
+    which would seem more stylistically pleasing. In an earlier version we did scan
+    over the layers but it resulted in XLA being unable to update the KV cache in-place
+    as it couldn't proof that we never again needed the old KV cache we were scanning over
+    therefore it doubled our KVs memory allocation (profiles showed 2x2 KV buffer instead
+    of the expected 2) and forced a bunch of expensive copy operations.
     """
     x, pos, Ks_all_layers, Vs_all_layers = carry
     block_params, is_local_attn, layer_idx = scans
@@ -314,10 +321,12 @@ def decode(
             next_token_log_prob,
         )
 
-    (_, _, ks_cached, vs_cached), (generated_tokens, generated_log_probs) = jax.lax.scan(
-        decode_step,
-        (logits, curr_pos, ks_cached, vs_cached),
-        sample_keys,
+    (_, _, ks_cached, vs_cached), (generated_tokens, generated_log_probs) = (
+        jax.lax.scan(
+            decode_step,
+            (logits, curr_pos, ks_cached, vs_cached),
+            sample_keys,
+        )
     )
 
     return generated_tokens, generated_log_probs, ks_cached, vs_cached
