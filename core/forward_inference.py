@@ -20,7 +20,7 @@ import functools
 import jax
 import jax.numpy as jnp
 from beartype import beartype
-from jaxtyping import Array, Bool, Float, Int, jaxtyped
+from jaxtyping import Array, Bool, Float, Int, PRNGKeyArray, jaxtyped
 from core.forward_common import (
     Params,
     RMSNorm,
@@ -244,22 +244,25 @@ def prefill(
 
 @functools.partial(
     jax.jit,
-    static_argnames=("max_new_tokens",),
+    static_argnames=("max_new_tokens", "temperature"),
     donate_argnames=("ks_cached", "vs_cached"),
 )
 def decode(
     params: Params,
+    key: PRNGKeyArray,
     logits: Float[Array, "vocab"],
     curr_pos: int | Int[Array, ""],
     ks_cached: Float[Array, "layer seq_len kv_head head_dim"],
     vs_cached: Float[Array, "layer seq_len kv_head value_dim"],
     max_new_tokens: int,
+    temperature: float,
 ) -> tuple[
     Int[Array, "decode_len"],
     Float[Array, "layer seq_len kv_head head_dim"],
     Float[Array, "layer seq_len kv_head value_dim"],
 ]:
     curr_pos = jnp.asarray(curr_pos, dtype=jnp.int32)
+    sample_keys = jax.random.split(key, max_new_tokens)
 
     def decode_step(
         carry: tuple[
@@ -268,7 +271,7 @@ def decode(
             Float[Array, "layer seq_len kv_head head_dim"],
             Float[Array, "layer seq_len kv_head value_dim"],
         ],
-        _: None,
+        step_key: PRNGKeyArray,
     ) -> tuple[
         tuple[
             Float[Array, "vocab"],
@@ -279,7 +282,12 @@ def decode(
         Int[Array, ""],
     ]:
         logits_curr, pos_curr, ks_curr, vs_curr = carry
-        next_token = jnp.argmax(logits_curr, axis=-1).astype(jnp.int32)
+        gumbel_noise = jax.random.gumbel(
+            step_key, logits_curr.shape, dtype=logits_curr.dtype
+        )
+        next_token = jnp.argmax(logits_curr + temperature * gumbel_noise).astype(
+            jnp.int32
+        )
         logits_next, ks_next, vs_next = forward_single(
             next_token,
             params,
@@ -292,8 +300,7 @@ def decode(
     (_, _, ks_cached, vs_cached), generated_tokens = jax.lax.scan(
         decode_step,
         (logits, curr_pos, ks_cached, vs_cached),
-        xs=None,
-        length=max_new_tokens,
+        sample_keys,
     )
 
     return generated_tokens, ks_cached, vs_cached

@@ -186,12 +186,17 @@ def stop_profiler(profiler_started: bool) -> None:
 
 def main() -> None:
     max_new_tokens = 400
+    decode_temperature = 1.0
+    seed = 42
+    key = jax.random.PRNGKey(seed)
     profiler_started = False
 
     wandb_logging.init_wandb(
         project="gemma-27b-inference",
         config={
             "max_new_tokens": max_new_tokens,
+            "decode_temperature": decode_temperature,
+            "seed": seed,
             "enable_profiler": ENABLE_PROFILER,
             "profile_logdir": PROFILE_LOGDIR,
             "profile_session_prefix": PROFILE_SESSION_PREFIX,
@@ -242,22 +247,25 @@ def main() -> None:
         prefill_elapsed = time.perf_counter() - prefill_start
 
         print("Compiling decode...")
+        decode_keys = jax.random.split(key, prompt_batch.batch_size)
         decode_batch = jax.vmap(
-            decode, in_axes=(None, 0, 0, 1, 1, None), out_axes=(1, 1, 1)
+            decode, in_axes=(None, 0, 0, 0, 1, 1, None, None), out_axes=(1, 1, 1)
         )
         decode_jit = jax.jit(
             decode_batch,
-            static_argnames=("max_new_tokens",),
+            static_argnames=("max_new_tokens", "temperature"),
             donate_argnames=("ks_cached", "vs_cached"),
         )
         decode_compile_start = time.perf_counter()
         compiled_decode = decode_jit.lower(
             params,
+            decode_keys,
             logits,
             prompt_batch.prompt_lengths_array,
             ks_cached,
             vs_cached,
             max_new_tokens,
+            decode_temperature,
         ).compile()
         decode_compile_elapsed = time.perf_counter() - decode_compile_start
         print(f"Decode JIT compilation time: {decode_compile_elapsed:.3f}s")
@@ -267,6 +275,7 @@ def main() -> None:
         generation_start = time.perf_counter()
         generated_tokens_array, ks_cached, vs_cached = compiled_decode(
             params,
+            decode_keys,
             logits,
             prompt_batch.prompt_lengths_array,
             ks_cached,
