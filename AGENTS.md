@@ -19,6 +19,13 @@
 - Prefer `jaxtyping` annotations for JAX-heavy function signatures when practical.
 - Do not use type aliases in function signatures; keep signatures explicit so they are readable at first sight.
 - Prefer fail-fast behavior over defensive fallbacks when invalid inputs indicate a caller bug. Do not silently clamp, coerce, or return placeholder outputs just to avoid errors unless explicitly requested.
+- Do not duplicate validation/invariant checks that core libraries already enforce (for example checkpoint schema checks in Orbax). Prefer calling the canonical library path and letting it fail fast; add wrapper validation only when it provides unique, high-value context that the library error cannot.
+- Write docstrings for non-trivial functions, but keep them focused on mechanism, intent, and execution plan ("what this function does and how").
+- Prefer plain-language, algorithm-oriented docstrings (often with a short "Plan:"/"Mechanism:" flow) over corporate reference templates.
+- Avoid "Args/Returns/Raises" boilerplate unless a function is external/public API where that format is genuinely helpful.
+- Commit messages should be short, concrete, and technical; describe the actual change, not a category label.
+- Prefer mechanism-aware subjects when useful (for example: "fix X by doing Y"), not vague summaries.
+- Keep commit subjects human and direct; avoid template-style noise and avoid listing housekeeping files like `AGENTS.md` unless that is the primary change.
 
 ## Agent memory hygiene
 
