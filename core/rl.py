@@ -34,6 +34,7 @@ import os
 import socket
 import jax
 import jax.numpy as jnp
+from jax.experimental import io_callback
 import optax
 from beartype import beartype
 from jaxtyping import Array, Float, Int, PRNGKeyArray, jaxtyped
@@ -237,7 +238,7 @@ def _impure_reward_fn(
 def reward_fn(
     output_tokens: Int[Array, "traj_len"], int_to_radicate: int | Int[Array, ""]
 ) -> tuple[Float[Array, ""], Float[Array, ""], Float[Array, ""], Int[Array, ""]]:
-    return jax.pure_callback(
+    return io_callback(
         _impure_reward_fn,
         (
             jax.ShapeDtypeStruct((), jnp.float32),
@@ -247,7 +248,6 @@ def reward_fn(
         ),
         output_tokens,
         int_to_radicate,
-        vmap_method="sequential",
     )
 
 
