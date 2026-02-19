@@ -407,11 +407,13 @@ def log_prop_of_trajectory(
     # use same temperature as at sample time
     logits = logits / SAMPLE_TEMP
 
-    # do the gather (expensive!)
-    # logits[:-1] predicts xs[1:]
-    log_probs = jax.nn.log_softmax(logits[:-1])
+    # logits[:-1] predicts xs[1:]. We only need log p(target) per position,
+    # so avoid materializing full log_softmax over vocab.
+    logits_next = logits[:-1]
     targets = jnp.expand_dims(xs[1:], axis=-1)  # shape (seq_len, 1)
-    log_probs_taken = jnp.take_along_axis(log_probs, targets, axis=-1).squeeze(-1)
+    target_logits = jnp.take_along_axis(logits_next, targets, axis=-1).squeeze(-1)
+    normalizer = jax.nn.logsumexp(logits_next, axis=-1)
+    log_probs_taken = target_logits - normalizer
 
     # we return the list of probabilities of every transition between tokens
     # we have to make sure to later mask out the prompt tokens which should have

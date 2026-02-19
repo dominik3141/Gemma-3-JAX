@@ -296,8 +296,11 @@ def decode(
         # (equivalent to temperature=1). Callers must treat this as a convention and not
         # as the same policy semantics as non-zero-temperature sampling log-probs.
         log_prob_temperature = jnp.where(temperature == 0.0, 1.0, temperature)
-        log_probs_curr = jax.nn.log_softmax(logits_curr / log_prob_temperature)
-        next_token_log_prob = log_probs_curr[next_token]
+        scaled_logits = logits_curr / log_prob_temperature
+        next_token_logit = scaled_logits[next_token]
+        next_token_log_prob = next_token_logit - jax.nn.logsumexp(
+            scaled_logits, axis=-1
+        )
 
         logits_next, ks_next, vs_next = forward_single(
             next_token,
