@@ -104,7 +104,7 @@ def Block_KV_cached(
     return (x, pos, Ks_all_layers, Vs_all_layers), None
 
 
-@functools.partial(jax.jit, donate_argnums=(3, 4))
+@functools.partial(jax.jit, donate_argnames=("Ks_cached", "Vs_cached"))
 @jaxtyped(typechecker=beartype)
 def forward_single(
     x: int | Int[Array, ""],
@@ -188,7 +188,7 @@ def allocate_kv_cache(
     return ks_cached, vs_cached
 
 
-@functools.partial(jax.jit, donate_argnums=(3, 4))
+@functools.partial(jax.jit, donate_argnames=("ks_cached", "vs_cached"))
 def prefill(
     params: Params,
     tokens: Int[Array, "prompt_len"],
@@ -242,7 +242,11 @@ def prefill(
     return last_real_logits, ks_cached, vs_cached
 
 
-@functools.partial(jax.jit, static_argnums=(5,), donate_argnums=(3, 4))
+@functools.partial(
+    jax.jit,
+    static_argnames=("max_new_tokens",),
+    donate_argnames=("ks_cached", "vs_cached"),
+)
 def decode(
     params: Params,
     logits: Float[Array, "vocab"],

@@ -50,7 +50,7 @@ def group_attention(
 
 
 @functools.partial(
-    jax.jit, donate_argnums=(0,)
+    jax.jit, donate_argnames=("xs",)
 )  # the scan should already compile this, but better to be explicit
 @jax.checkpoint  # OOM problems without this
 def Block(
