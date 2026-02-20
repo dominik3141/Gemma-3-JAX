@@ -138,15 +138,17 @@ EXPECTED_TARGET_SPECS: dict[str, jax.ShapeDtypeStruct] = {
 }
 
 SHARDING_PLAN: dict[str, PartitionSpec] = {
-    "language_model.model.embed_tokens.weight": PartitionSpec(None, "model"),
+    "language_model.model.embed_tokens.weight": PartitionSpec("model", None),
     "language_model.model.layers.input_layernorm.weight": PartitionSpec(None, None),
     "language_model.model.layers.mlp.down_proj.weight": PartitionSpec(
-        None, "model", None
-    ),
-    "language_model.model.layers.mlp.gate_proj.weight": PartitionSpec(
         None, None, "model"
     ),
-    "language_model.model.layers.mlp.up_proj.weight": PartitionSpec(None, None, "model"),
+    "language_model.model.layers.mlp.gate_proj.weight": PartitionSpec(
+        None, "model", None
+    ),
+    "language_model.model.layers.mlp.up_proj.weight": PartitionSpec(
+        None, "model", None
+    ),
     "language_model.model.layers.post_attention_layernorm.weight": PartitionSpec(
         None, None
     ),
@@ -158,17 +160,17 @@ SHARDING_PLAN: dict[str, PartitionSpec] = {
     ),
     "language_model.model.layers.self_attn.k_norm.weight": PartitionSpec(None, None),
     "language_model.model.layers.self_attn.k_proj.weight": PartitionSpec(
-        None, None, "model"
+        None, "model", None
     ),
     "language_model.model.layers.self_attn.o_proj.weight": PartitionSpec(
-        None, "model", None
+        None, None, "model"
     ),
     "language_model.model.layers.self_attn.q_norm.weight": PartitionSpec(None, None),
     "language_model.model.layers.self_attn.q_proj.weight": PartitionSpec(
-        None, None, "model"
+        None, "model", None
     ),
     "language_model.model.layers.self_attn.v_proj.weight": PartitionSpec(
-        None, None, "model"
+        None, "model", None
     ),
     "language_model.model.norm.weight": PartitionSpec(None),
     "multi_modal_projector.mm_input_projection_weight": PartitionSpec(None, None),
@@ -227,6 +229,7 @@ SHARDING_PLAN: dict[str, PartitionSpec] = {
     "vision_tower.vision_model.post_layernorm.bias": PartitionSpec(None),
     "vision_tower.vision_model.post_layernorm.weight": PartitionSpec(None),
 }
+
 
 def _build_target(mesh: Mesh) -> dict[str, jax.ShapeDtypeStruct]:
     """
