@@ -40,5 +40,6 @@ For large multihost TPU profiles, prefer the remote VM workflow documented in
 1. Flash attention[^1]
 2. All other inference optimizations I can come up with
 3. Commit the HLO dumps so we can easily spot bisect expected XLA performance issues relative to code changes
+4. RL memory ownership at the train-loop boundary is unclear. `main` is not jitted (logging/checkpoint side effects), so JAX cannot infer host-side liveness across iterations. Missing donation may keep old and new parameter buffers alive simultaneously, which could result in 2x parameter-buffer footprint. (Similar to the KV cache problem we had earlier).
 
 [^1]: The reason I haven't done this yet is because I want to implement it myself and JAX primitives are insufficient, so I will have to go one level lower and implement it in Pallas. But first I have to learn Pallas, so this might take a week or two.

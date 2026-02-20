@@ -23,7 +23,7 @@ from utils.profiling import build_shared_profile_options
 REFERENCE_PARAMS_UPDATE_INTERVAL = 400  # as suggested by the R1 paper
 CHECKPOINT_INTERVAL = 25
 ENABLE_PROFILER = True
-PROFILE_STOP_STEP = 5
+PROFILE_STOP_STEP = 2
 PROFILE_LOGDIR = "gs://gemma-3-training-profiles-20260207-165411-1d9c5e-euw4"
 PROFILE_SESSION_PREFIX = "gemma_rl"
 PROFILE_START_BARRIER_NAME = "gemma_rl_profile_start"
