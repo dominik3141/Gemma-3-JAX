@@ -128,6 +128,7 @@ def Block(
 
     return xs, None
 
+
 @jax.jit
 @jaxtyped(typechecker=beartype)
 def forward_parralel(
@@ -161,7 +162,10 @@ def forward_parralel(
     # Generate the pattern list based on the 5:1 interleaving rule
     is_local_attn = get_gemma3_layer_types(config.num_layers)
     xs, _ = jax.lax.scan(
-        Block, xs, (extract_block_params(params, model_prefix), is_local_attn)
+        Block,
+        xs,
+        (extract_block_params(params, model_prefix), is_local_attn),
+        unroll=True,
     )
 
     # final norm
