@@ -154,6 +154,7 @@ def forward_single(
             is_local_attn,
             layer_indices,
         ),
+        unroll=True,
     )
 
     # final norm
