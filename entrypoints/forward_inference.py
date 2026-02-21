@@ -185,7 +185,7 @@ def stop_profiler(profiler_started: bool) -> None:
 
 
 def main() -> None:
-    max_new_tokens = 400
+    max_new_tokens = 10_000
     decode_temperature = 1.0
     seed = 42
     key = jax.random.PRNGKey(seed)
@@ -213,7 +213,9 @@ def main() -> None:
 
         prompt_batch = build_prompt_batch(get_prompts())
         kv_cache_len = prompt_batch.max_prompt_tokens + max_new_tokens + 1
-        ks_cached, vs_cached = allocate_kv_cache(prompt_batch.batch_size, kv_cache_len)
+        ks_cached, vs_cached = allocate_kv_cache(
+            prompt_batch.batch_size, kv_cache_len, mesh
+        )
 
         print("Compiling prefill...")
         prefill_batch = jax.vmap(

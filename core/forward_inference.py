@@ -20,6 +20,7 @@ import functools
 import jax
 import jax.numpy as jnp
 from beartype import beartype
+from jax.sharding import PartitionSpec, NamedSharding
 from jaxtyping import Array, Bool, Float, Int, PRNGKeyArray, jaxtyped
 from core.forward_common import (
     Params,
@@ -167,12 +168,13 @@ def forward_single(
 
 
 def allocate_kv_cache(
-    batch_size: int,
-    kv_cache_len: int,
+    batch_size: int, kv_cache_len: int, mesh: jax.sharding.Mesh
 ) -> tuple[
     Float[Array, "layer batch seq_len kv_head head_dim"],
     Float[Array, "layer batch seq_len kv_head value_dim"],
 ]:
+    kv_sharding = NamedSharding(mesh, PartitionSpec(None, None, None, "model", None))
+
     ks_cached = jnp.zeros(
         (
             config.num_layers,
@@ -182,6 +184,7 @@ def allocate_kv_cache(
             config.head_dim,
         ),
         dtype=jnp.bfloat16,
+        device=kv_sharding,
     )
     vs_cached = jnp.zeros(
         (
@@ -192,7 +195,9 @@ def allocate_kv_cache(
             config.d_kvq,
         ),
         dtype=jnp.bfloat16,
+        device=kv_sharding,
     )
+
     return ks_cached, vs_cached
 
 
