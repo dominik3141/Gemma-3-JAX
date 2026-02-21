@@ -38,7 +38,7 @@ from jax.experimental import io_callback
 import optax
 from beartype import beartype
 from jaxtyping import Array, Float, Int, PRNGKeyArray, jaxtyped
-from core.forward_parralel import Params, forward_parralel
+from core.forward_parallel import Params, forward_parralel
 from core.forward_inference import allocate_kv_cache, decode, prefill
 from utils.gcp import log_text_async
 from utils.tokenize_text import tokenize_text, detokenize_ids
@@ -48,6 +48,7 @@ import functools
 HOSTNAME = socket.gethostname()
 PID = os.getpid()
 LOGGER = logging.getLogger(__name__)
+
 
 def get_prompt(n: int | Int[Array, ""]) -> Int[Array, "prompt_len"]:
     r"""
@@ -470,8 +471,9 @@ def get_group(
 
     # calculate the KV cache of the prompt
     prompt_len = prompt.shape[0]
+    mesh = jax.sharding.Mesh(jax.devices(), axis_names=("model",))
     K_cache_batched, V_cache_batched = allocate_kv_cache(
-        group_size, MAX_RESPONSE_LENGTH
+        group_size, MAX_RESPONSE_LENGTH, mesh
     )
 
     # Prefill once because every group element shares the same prompt,
