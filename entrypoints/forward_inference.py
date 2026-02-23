@@ -237,6 +237,7 @@ def main() -> None:
         print(f"Prefill JIT compilation time: {prefill_compile_elapsed:.3f}s")
 
         print("Processing prompts (prefill)...")
+        multihost_utils.sync_global_devices("gemma_inference_prefill_start")
         prefill_start = time.perf_counter()
         logits, ks_cached, vs_cached = compiled_prefill(
             params,
@@ -246,6 +247,7 @@ def main() -> None:
             vs_cached,
         )
         logits.block_until_ready()
+        multihost_utils.sync_global_devices("gemma_inference_prefill_stop")
         prefill_elapsed = time.perf_counter() - prefill_start
 
         print("Compiling decode...")
@@ -274,6 +276,7 @@ def main() -> None:
 
         print("Prompts processed.")
         print("Generating batched completions...")
+        multihost_utils.sync_global_devices("gemma_inference_generation_start")
         generation_start = time.perf_counter()
         generated_tokens_array, _, ks_cached, vs_cached = compiled_decode(
             params,
@@ -284,6 +287,7 @@ def main() -> None:
             vs_cached,
         )
         generated_tokens_array.block_until_ready()
+        multihost_utils.sync_global_devices("gemma_inference_generation_stop")
         generation_elapsed = time.perf_counter() - generation_start
 
         generated_tokens_batch = np.asarray(generated_tokens_array).T.tolist()
