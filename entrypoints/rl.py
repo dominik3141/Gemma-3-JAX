@@ -1,4 +1,6 @@
 import logging
+import os
+import socket
 
 import jax
 import jax.experimental.multihost_utils as multihost_utils
@@ -10,6 +12,7 @@ from core.rl import (
     EPSILON,
     GROUP_SIZE,
     LEARNING_RATE,
+    MUON_OPTIMIZER,
     MAX_RESPONSE_LENGTH,
     MAX_ROOT,
     MIN_ROOT,
@@ -17,6 +20,7 @@ from core.rl import (
     SAMPLE_TEMP,
     train_loop,
 )
+from utils.gcp import upload_directory_tarball_to_gcs
 from utils.params_io_27b import DEFAULT_ORBAX_CHECKPOINT, load_params, save_params
 from utils.profiling import build_shared_profile_options
 
@@ -28,6 +32,7 @@ PROFILE_LOGDIR = "gs://gemma-3-training-profiles-20260207-165411-1d9c5e-euw4"
 PROFILE_SESSION_PREFIX = "gemma_rl"
 PROFILE_START_BARRIER_NAME = "gemma_rl_profile_start"
 PROFILE_STOP_BARRIER_NAME = "gemma_rl_profile_stop"
+HLO_DUMP_UPLOAD_ROOT = f"{PROFILE_LOGDIR.rstrip('/')}/hlo_dumps"
 LOGGER = logging.getLogger(__name__)
 
 
@@ -62,14 +67,47 @@ def stop_profiler() -> None:
     LOGGER.info("Stopped JAX profiler trace.")
 
 
+def upload_hlo_dumps() -> None:
+    if jax.process_index() != 0:
+        return
+
+    source_dir = os.environ.get("GEMMA_XLA_DUMP_DIR", "artifacts/hlo")
+    archive_stem = (
+        f"rl_xla_{socket.gethostname()}_pid{os.getpid()}_p{jax.process_index()}"
+    )
+    try:
+        upload_directory_tarball_to_gcs(source_dir, HLO_DUMP_UPLOAD_ROOT, archive_stem)
+    except Exception:
+        LOGGER.exception("Failed to upload XLA dump archive.")
+
+
+def precompile_train_loop(
+    key: jax.Array,
+    params: dict,
+    params_ref: dict,
+    optimizer_state: optax.OptState,
+) -> None:
+    LOGGER.info("Precompiling train_loop to force early XLA dump emission...")
+    lowered = train_loop.lower(key, params, params_ref, optimizer_state)
+    lowered.compile()
+    LOGGER.info("Finished precompiling train_loop.")
+
+
 def main() -> None:
     key = jax.random.PRNGKey(42)
     mesh = jax.sharding.Mesh(jax.devices(), axis_names=("model",))
     params = load_params(DEFAULT_ORBAX_CHECKPOINT, mesh)
 
-    optimizer_state = optax.contrib.muon(learning_rate=LEARNING_RATE).init(params)
+    optimizer_state = MUON_OPTIMIZER.init(params)
     params_ref = params
     i = 0
+
+    try:
+        precompile_train_loop(key, params, params_ref, optimizer_state)
+    except Exception:
+        upload_hlo_dumps()
+        raise
+    upload_hlo_dumps()
 
     wandb_logging.init_wandb(
         project="gemma-27b-r1-zero",
@@ -103,6 +141,7 @@ def main() -> None:
             params, loss, format_pct, correct_pct, optimizer_state = train_loop(
                 key, params, params_ref, optimizer_state
             )
+
             key, _ = jax.random.split(key)
             loss, format_pct, correct_pct = jax.device_get(
                 (loss, format_pct, correct_pct)

@@ -14,6 +14,7 @@ import jax.numpy as jnp
 import orbax.checkpoint as ocp
 from jax.sharding import Mesh, NamedSharding, PartitionSpec
 from jaxtyping import Array, Float
+from optax.contrib import MuonDimensionNumbers
 
 Params = dict[str, Float[Array, "..."]]
 
@@ -230,6 +231,8 @@ SHARDING_PLAN: dict[str, PartitionSpec] = {
     "vision_tower.vision_model.post_layernorm.weight": PartitionSpec(None),
 }
 
+_PATCH_EMBEDDING_WEIGHT_KEY = "vision_tower.vision_model.embeddings.patch_embedding.weight"
+
 
 def _build_target(mesh: Mesh) -> dict[str, jax.ShapeDtypeStruct]:
     """
@@ -251,6 +254,55 @@ def _build_target(mesh: Mesh) -> dict[str, jax.ShapeDtypeStruct]:
             sharding=sharding,
         )
     return target
+
+
+def muon_weight_dimension_numbers_for_27b(
+    params: Params,
+) -> dict[str, MuonDimensionNumbers | None]:
+    """
+    Build Muon reshape specs for the Gemma 27B parameter tree.
+
+    Plan:
+    1.  1D leaves are marked as ``None`` so Muon routes them to Adam.
+    2.  2D leaves are interpreted as ``W @ x`` matrices with
+        ``reduction_axis=1`` and ``output_axis=0``.
+    3.  3D leaves use axis 0 as a batch axis (stacked layers), with
+        ``reduction_axis=2`` and ``output_axis=1``.
+    4.  The vision patch embedding convolution uses a dedicated 4D spec that
+        treats ``(in_channels, kernel_h, kernel_w)`` as reduction axes.
+    """
+    dim_numbers: dict[str, MuonDimensionNumbers | None] = {}
+    for key, value in params.items():
+        if key not in EXPECTED_TARGET_SPECS:
+            raise ValueError(f"Unexpected 27B parameter key: {key!r}")
+
+        if key == _PATCH_EMBEDDING_WEIGHT_KEY:
+            if value.ndim != 4:
+                raise ValueError(
+                    "Vision patch embedding weight must be rank-4, got "
+                    f"{value.ndim} for {key!r}."
+                )
+            dim_numbers[key] = MuonDimensionNumbers(
+                reduction_axis=(1, 2, 3),
+                output_axis=0,
+            )
+            continue
+
+        if value.ndim == 1:
+            dim_numbers[key] = None
+        elif value.ndim == 2:
+            dim_numbers[key] = MuonDimensionNumbers(reduction_axis=1, output_axis=0)
+        elif value.ndim == 3:
+            dim_numbers[key] = MuonDimensionNumbers(reduction_axis=2, output_axis=1)
+        elif value.ndim == 4:
+            raise ValueError(
+                f"Unexpected rank-4 parameter {key!r}. Add an explicit Muon reshape rule."
+            )
+        else:
+            raise ValueError(
+                f"Unsupported parameter rank {value.ndim} for key {key!r}."
+            )
+    return dim_numbers
 
 
 def _join_checkpoint_path(root: str, name: str) -> str:

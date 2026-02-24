@@ -17,7 +17,7 @@ Plan:
 MAX_ROOT = 900
 MIN_ROOT = 1
 SAMPLE_TEMP = 1  # as suggested by R1 paper
-GROUP_SIZE = 4  # as suggested by R1 paper
+GROUP_SIZE = 1  # as suggested by R1 paper
 MAX_RESPONSE_LENGTH = 500
 EPSILON = 0.1
 BETA = 0.001  # as suggested by R1 paper
@@ -41,6 +41,7 @@ from jaxtyping import Array, Float, Int, PRNGKeyArray, jaxtyped
 from core.forward_parallel import Params, forward_parralel
 from core.forward_inference import allocate_kv_cache, decode, prefill
 from utils.gcp import log_text_async
+from utils.params_io_27b import muon_weight_dimension_numbers_for_27b
 from utils.tokenize_text import tokenize_text, detokenize_ids
 import utils.wandb_logging as wandb_logging
 import functools
@@ -48,6 +49,11 @@ import functools
 HOSTNAME = socket.gethostname()
 PID = os.getpid()
 LOGGER = logging.getLogger(__name__)
+
+MUON_OPTIMIZER = optax.contrib.muon(
+    learning_rate=LEARNING_RATE,
+    muon_weight_dimension_numbers=muon_weight_dimension_numbers_for_27b,
+)
 
 
 def get_prompt(n: int | Int[Array, ""]) -> Int[Array, "prompt_len"]:
@@ -581,9 +587,9 @@ def train_loop(
     )
 
     # update parameters
-    grad_updates, new_optimizer_state = optax.contrib.muon(
-        learning_rate=LEARNING_RATE
-    ).update(accumulated_grads, optimizer_state, params)
+    grad_updates, new_optimizer_state = MUON_OPTIMIZER.update(
+        accumulated_grads, optimizer_state, params
+    )
     new_params = optax.apply_updates(params, grad_updates)
 
     return (
