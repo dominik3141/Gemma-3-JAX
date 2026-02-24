@@ -231,8 +231,6 @@ SHARDING_PLAN: dict[str, PartitionSpec] = {
     "vision_tower.vision_model.post_layernorm.weight": PartitionSpec(None),
 }
 
-_PATCH_EMBEDDING_WEIGHT_KEY = "vision_tower.vision_model.embeddings.patch_embedding.weight"
-
 
 def _build_target(mesh: Mesh) -> dict[str, jax.ShapeDtypeStruct]:
     """
@@ -276,11 +274,19 @@ def muon_weight_dimension_numbers_for_27b(
         if key not in EXPECTED_TARGET_SPECS:
             raise ValueError(f"Unexpected 27B parameter key: {key!r}")
 
-        if key == _PATCH_EMBEDDING_WEIGHT_KEY:
-            if value.ndim != 4:
+        # During masked optimizer updates, Optax may pass sentinel leaf values
+        # (e.g. MaskedNode) that intentionally do not expose ndarray attributes.
+        # Treat those leaves as non-Muon for this call site.
+        ndim = getattr(value, "ndim", None)
+        if ndim is None:
+            dim_numbers[key] = None
+            continue
+
+        if key == "vision_tower.vision_model.embeddings.patch_embedding.weight":
+            if ndim != 4:
                 raise ValueError(
                     "Vision patch embedding weight must be rank-4, got "
-                    f"{value.ndim} for {key!r}."
+                    f"{ndim} for {key!r}."
                 )
             dim_numbers[key] = MuonDimensionNumbers(
                 reduction_axis=(1, 2, 3),
@@ -288,20 +294,18 @@ def muon_weight_dimension_numbers_for_27b(
             )
             continue
 
-        if value.ndim == 1:
+        if ndim == 1:
             dim_numbers[key] = None
-        elif value.ndim == 2:
+        elif ndim == 2:
             dim_numbers[key] = MuonDimensionNumbers(reduction_axis=1, output_axis=0)
-        elif value.ndim == 3:
+        elif ndim == 3:
             dim_numbers[key] = MuonDimensionNumbers(reduction_axis=2, output_axis=1)
-        elif value.ndim == 4:
+        elif ndim == 4:
             raise ValueError(
                 f"Unexpected rank-4 parameter {key!r}. Add an explicit Muon reshape rule."
             )
         else:
-            raise ValueError(
-                f"Unsupported parameter rank {value.ndim} for key {key!r}."
-            )
+            raise ValueError(f"Unsupported parameter rank {ndim} for key {key!r}.")
     return dim_numbers
 
 

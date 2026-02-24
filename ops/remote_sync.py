@@ -114,6 +114,7 @@ def sync_code(vm_name, zone, is_tpu):
         "*.ckpt",
         "source_*.tar.gz",
         "dev_sync.tar.gz",
+        "artifacts",  # Local run artifacts should never be synced
         "data",  # Don't sync data directory
         "jax-trace",  # JAX trace files (2.7GB!)
         "HLO_dumps",  # HLO dumps

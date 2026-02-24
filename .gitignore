@@ -38,3 +38,4 @@ HLO_dumps/
 .pytest_cache
 .ruff_cache
 .uv-cache
+artifacts/
