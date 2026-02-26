@@ -8,7 +8,8 @@ Responsibilities:
 2. Install `uv`.
 3. Sync dependencies (`uv sync`).
 4. Download tokenizer files from GCS.
-5. Launch `main.py`.
+5. Download training data from GCS.
+6. Launch `main.py`.
 """
 
 import os
@@ -25,7 +26,11 @@ TOKENIZER_DIR = "data/common"
 TOKENIZER_FILES = [
     "tokenizer.model",
 ]
-TOKENIZER_SENTINEL = os.path.join(TOKENIZER_DIR, "tokenizer.model")
+TRAIN_DATA_ROOT = "gs://gemma-3-weights-231d4b-euw4/data/train"
+TRAIN_DATA_DIR = "data/train"
+TRAIN_DATA_FILES = [
+    "shakespeare.txt",
+]
 
 
 def run(cmd, check=True, shell=False):
@@ -115,25 +120,25 @@ def ensure_gsutil() -> None:
     print("WARNING: gsutil not found on PATH. Falling back to uv-based GCS downloads.")
 
 
-def download_tokenizer() -> None:
-    if os.path.exists(TOKENIZER_SENTINEL):
-        print(f"--- Tokenizer already present at {TOKENIZER_SENTINEL} ---")
+def _download_from_gcs(gcs_root: str, filenames: list[str], dest_dir: str, label: str) -> None:
+    expected = [os.path.join(dest_dir, filename) for filename in filenames]
+    if all(os.path.exists(path) for path in expected):
+        print(f"--- {label} already present in {dest_dir} ---")
         return
 
     ensure_gsutil()
 
-    os.makedirs(TOKENIZER_DIR, exist_ok=True)
-    for filename in TOKENIZER_FILES:
-        source = f"{TOKENIZER_ROOT}/{filename}"
-        dest = os.path.join(TOKENIZER_DIR, filename)
-        print(f"--- Downloading tokenizer: {source} ---")
+    os.makedirs(dest_dir, exist_ok=True)
+    for filename in filenames:
+        source = f"{gcs_root}/{filename}"
+        dest = os.path.join(dest_dir, filename)
+        print(f"--- Downloading {label}: {source} ---")
 
         # Use uv run python to download via google-cloud-storage to avoid broken system gsutil
-        bucket_name = TOKENIZER_ROOT.replace("gs://", "").split("/")[0]
-        blob_path = (
-            "/".join(TOKENIZER_ROOT.replace("gs://", "").split("/")[1:])
-            + f"/{filename}"
-        )
+        normalized_root = gcs_root.replace("gs://", "")
+        bucket_name = normalized_root.split("/")[0]
+        blob_parts = normalized_root.split("/")[1:]
+        blob_path = "/".join(blob_parts + [filename])
 
         gcs_cmd = [
             "uv",
@@ -145,12 +150,21 @@ def download_tokenizer() -> None:
         try:
             run(gcs_cmd)
         except Exception as e:
-            print(f"uv-based download failed: {e}. Trying gsutil as fallback...")
+            print(f"uv-based download failed for {source}: {e}. Trying gsutil as fallback...")
             run(["gsutil", "cp", source, dest])
 
-    if not os.path.exists(TOKENIZER_SENTINEL):
-        print(f"ERROR: Expected tokenizer file missing: {TOKENIZER_SENTINEL}")
+    missing = [path for path in expected if not os.path.exists(path)]
+    if missing:
+        print(f"ERROR: Missing downloaded file(s) after fetch: {', '.join(missing)}")
         sys.exit(1)
+
+
+def download_tokenizer() -> None:
+    _download_from_gcs(TOKENIZER_ROOT, TOKENIZER_FILES, TOKENIZER_DIR, "tokenizer files")
+
+
+def download_training_data() -> None:
+    _download_from_gcs(TRAIN_DATA_ROOT, TRAIN_DATA_FILES, TRAIN_DATA_DIR, "training data")
 
 
 def enable_hugepages() -> None:
@@ -178,6 +192,7 @@ def main():
     sync_dependencies()
 
     download_tokenizer()
+    download_training_data()
 
     if args.run_main:
         print("--- Launching main.py ---")

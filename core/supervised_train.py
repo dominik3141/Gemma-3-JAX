@@ -21,10 +21,11 @@ import jax.numpy as jnp
 import optax
 from beartype import beartype
 from jaxtyping import Array, Float, Int, PRNGKeyArray, jaxtyped
-from core.forward_parralel import forward_parralel
-from core.forward_parralel import Params
+from core.forward_parallel import forward_parralel
+from core.forward_parallel import Params
 from utils.sft_data import get_training_sample
 from functools import partial
+from utils.params_io_27b import muon_weight_dimension_numbers_for_27b
 
 LEARNING_RATE = 0.01
 
@@ -55,9 +56,10 @@ def train(
     train_data = jax.lax.with_sharding_constraint(train_data, data_sharding)
 
     loss, grads = jax.value_and_grad(loss_batched, argnums=1)(train_data, params)
-    updates, new_optimizer_state = optax.contrib.muon(learning_rate=LEARNING_RATE).update(
-        grads, optimizer_state, params
-    )
+    updates, new_optimizer_state = optax.contrib.muon(
+        learning_rate=LEARNING_RATE,
+        muon_weight_dimension_numbers=muon_weight_dimension_numbers_for_27b,
+    ).update(grads, optimizer_state, params)
     new_params = optax.apply_updates(params, updates)
     return new_params, loss, new_optimizer_state
 
