@@ -28,4 +28,8 @@ This is very much a work in progress, but the current code already samples not o
 3. Commit the HLO dumps so we can easily spot bisect expected XLA performance issues relative to code changes
 4. RL memory ownership at the train-loop boundary is unclear. `main` is not jitted (logging/checkpoint side effects), so JAX cannot infer host-side liveness across iterations. Missing donation may keep old and new parameter buffers alive simultaneously, which could result in 2x parameter-buffer footprint. (Similar to the KV cache problem we had earlier).
 
+## Acknowledgements
+
+Research supported with Cloud TPUs from Google's TPU Research Cloud (TRC).
+
 [^1]: The reason I haven't done this yet is because I want to implement it myself and JAX primitives are insufficient, so I will have to go one level lower and implement it in Pallas. But first I have to learn Pallas, so this might take a week or two.
